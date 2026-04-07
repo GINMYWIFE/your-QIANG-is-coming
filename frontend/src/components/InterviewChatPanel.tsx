@@ -1,8 +1,10 @@
-import {useMemo, useRef} from 'react';
+import * as React from 'react';
+import {useMemo, useRef, useState, useEffect} from 'react';
 import {motion} from 'framer-motion';
 import {Virtuoso, type VirtuosoHandle} from 'react-virtuoso';
 import type {InterviewQuestion, InterviewSession} from '../types/interview';
-import {Send, User} from 'lucide-react';
+import {Send, User, Mic, MicOff, Volume2, VolumeX} from 'lucide-react';
+import {useWebSpeech} from '../hooks/useWebSpeech';
 
 interface Message {
   type: 'interviewer' | 'user';
@@ -40,6 +42,52 @@ export default function InterviewChatPanel({
   onShowCompleteConfirm
 }: InterviewChatPanelProps) {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+
+  // Web Speech API
+  const [autoSpeak, setAutoSpeak] = useState(true);
+  const prevMessagesLength = useRef(messages.length);
+  
+  const {
+    isListening,
+    isSpeaking,
+    supported: speechSupported,
+    startListening,
+    stopListening,
+    speak,
+    stopSpeaking
+  } = useWebSpeech({
+    onResult: (finalText) => {
+      if (finalText) {
+         onAnswerChange(answer + finalText);
+      }
+    }
+  });
+
+  // 自动朗读面试官的最新消息
+  useEffect(() => {
+    if (autoSpeak && messages.length > prevMessagesLength.current) {
+      const latestMessage = messages[messages.length - 1];
+      if (latestMessage.type === 'interviewer') {
+        speak(latestMessage.content);
+      }
+    }
+    prevMessagesLength.current = messages.length;
+  }, [messages, autoSpeak, speak]);
+
+  const toggleListen = () => {
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening();
+    }
+  };
+
+  const toggleAutoSpeak = () => {
+    if (autoSpeak) {
+      stopSpeaking();
+    }
+    setAutoSpeak(!autoSpeak);
+  };
 
   const progress = useMemo(() => {
     if (!session || !currentQuestion) return 0;
@@ -92,14 +140,44 @@ export default function InterviewChatPanel({
         />
 
         {/* 输入区域 */}
-            <div className="border-t border-slate-200 dark:border-slate-600 p-4 bg-slate-50 dark:bg-slate-700/50">
+        <div className="border-t border-slate-200 dark:border-slate-600 p-4 bg-slate-50 dark:bg-slate-700/50">
+          {speechSupported && (
+            <div className="flex gap-2 mb-3">
+              <button
+                onClick={toggleAutoSpeak}
+                className={`px-3 py-1.5 rounded-lg border transition-colors flex items-center gap-1.5 text-sm ${
+                  autoSpeak
+                    ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400'
+                    : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'
+                }`}
+                title={autoSpeak ? "关闭自动朗读" : "开启自动朗读"}
+              >
+                {autoSpeak ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                {isSpeaking ? '朗读中...' : '自动朗读'}
+              </button>
+              <button
+                onClick={toggleListen}
+                className={`px-3 py-1.5 rounded-lg border transition-colors flex items-center gap-1.5 text-sm ${
+                  isListening
+                    ? 'bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 animate-pulse'
+                    : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'
+                }`}
+                title={isListening ? "停止录音" : "开始录音"}
+              >
+                {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                {isListening ? '聆听中...' : '语音输入'}
+              </button>
+            </div>
+          )}
           <div className="flex gap-3">
             <textarea
               value={answer}
               onChange={(e) => onAnswerChange(e.target.value)}
               onKeyDown={handleKeyPress}
-              placeholder="输入你的回答... (Ctrl/Cmd + Enter 提交)"
-              className="flex-1 px-4 py-3 border border-slate-300 dark:border-slate-500 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500"
+              placeholder={isListening ? "正在聆听..." : "输入你的回答... (Ctrl/Cmd + Enter 提交)"}
+              className={`flex-1 px-4 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 ${
+                isListening ? 'border-red-300 dark:border-red-700 ring-2 ring-red-100 dark:ring-red-900/30' : 'border-slate-300 dark:border-slate-500'
+              }`}
               rows={3}
               disabled={isSubmitting}
             />
@@ -107,7 +185,7 @@ export default function InterviewChatPanel({
               <motion.button
                 onClick={onSubmit}
                 disabled={!answer.trim() || isSubmitting}
-                className="px-6 py-3 bg-primary-500 text-white rounded-xl font-medium hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                className="px-6 py-3 bg-primary-500 text-white rounded-xl font-medium hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 whileHover={{ scale: isSubmitting || !answer.trim() ? 1 : 1.02 }}
                 whileTap={{ scale: isSubmitting || !answer.trim() ? 1 : 0.98 }}
               >
