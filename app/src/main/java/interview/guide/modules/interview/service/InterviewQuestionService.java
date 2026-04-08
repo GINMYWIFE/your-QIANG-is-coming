@@ -1,0 +1,289 @@
+package interview.guide.modules.interview.service;
+
+import interview.guide.common.ai.StructuredOutputInvoker;
+import interview.guide.common.exception.BusinessException;
+import interview.guide.common.exception.ErrorCode;
+import interview.guide.modules.interview.model.InterviewQuestionDTO;
+import interview.guide.modules.interview.model.InterviewQuestionDTO.QuestionType;
+import interview.guide.modules.knowledgebase.service.KnowledgeBaseQueryService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.prompt.PromptTemplate;
+import org.springframework.ai.converter.BeanOutputConverter;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
+import org.springframework.stereotype.Service;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+/**
+ * 面试问题生成服务
+ * 基于简历内容生成针对性的面试问题
+ */
+@Service
+public class InterviewQuestionService {
+    
+    private static final Logger log = LoggerFactory.getLogger(InterviewQuestionService.class);
+    
+    private final ChatClient chatClient; // 用于与AI模型交互的客户端
+    private final PromptTemplate systemPromptTemplate; // 系统提示模板
+    private final PromptTemplate userPromptTemplate; // 用户提示模板
+    private final BeanOutputConverter<QuestionListDTO> outputConverter; // 输出转换器
+    private final StructuredOutputInvoker structuredOutputInvoker; // 结构化输出调用器
+    private final int followUpCount; // 追问次数
+    
+    private static final int MAX_FOLLOW_UP_COUNT = 2;      // 最大追问次数
+    
+    // 中间DTO用于接收AI响应
+    private record QuestionListDTO(
+        List<QuestionDTO> questions // 问题列表
+    ) {}
+    
+    private record QuestionDTO(
+        String question,
+        String type,
+        String category,
+        List<String> followUps // 追问问题列表
+    ) {}
+    
+    private final KnowledgeBaseQueryService knowledgeBaseQueryService;  // 知识库查询服务
+    
+    public InterviewQuestionService(
+            ChatClient.Builder chatClientBuilder,
+            StructuredOutputInvoker structuredOutputInvoker,
+            KnowledgeBaseQueryService knowledgeBaseQueryService,
+            @Value("classpath:prompts/interview-question-system.st") Resource systemPromptResource,
+            @Value("classpath:prompts/interview-question-user.st") Resource userPromptResource,
+            @Value("${app.interview.follow-up-count:1}") int followUpCount) throws IOException {
+        this.chatClient = chatClientBuilder.build();
+        this.structuredOutputInvoker = structuredOutputInvoker;
+        this.knowledgeBaseQueryService = knowledgeBaseQueryService;
+        this.systemPromptTemplate = new PromptTemplate(systemPromptResource.getContentAsString(StandardCharsets.UTF_8));
+        this.userPromptTemplate = new PromptTemplate(userPromptResource.getContentAsString(StandardCharsets.UTF_8));
+        this.outputConverter = new BeanOutputConverter<>(QuestionListDTO.class);
+        this.followUpCount = Math.max(0, Math.min(followUpCount, MAX_FOLLOW_UP_COUNT));
+    }
+    
+    /**
+     * 基于知识库生成面试问题
+     * 
+     * @param resumeText 简历文本
+     * @param questionCount 问题数量
+     * @param knowledgeBaseId 知识库ID
+     * @return 面试问题列表
+     */
+    public List<InterviewQuestionDTO> generateQuestionsFromKnowledgeBase(String resumeText, int questionCount, Long knowledgeBaseId) {
+        log.info("从知识库 {} 生成面试问题, 问题数量: {}", knowledgeBaseId, questionCount);
+        
+        // 1. 从简历中提取关键词或核心领域
+        String keywordPrompt = "请从以下简历内容中提取 3-5 个核心技术栈或项目领域，用逗号分隔返回，不要有任何多余文字：\n" + resumeText;
+        String keywords = chatClient.prompt(keywordPrompt).call().content();
+        log.info("提取简历关键词: {}", keywords);
+        
+        // 2. 基于关键词从知识库检索背景知识
+        String context = knowledgeBaseQueryService.answerQuestion(knowledgeBaseId, "请提供关于以下领域的基础面试题、核心原理和面试常见考点：" + keywords);
+        
+        // 3. 结合简历和知识库背景生成问题
+        // 这里我们可以复用现有的 generateQuestions 逻辑，但把检索到的内容作为背景信息补充到提示词中
+        String augmentedResumeText = "【岗位知识背景】\n" + context + "\n\n【个人简历内容】\n" + resumeText;
+        
+        return generateQuestions(augmentedResumeText, questionCount, null);
+    }
+    
+    /**
+     * 生成面试问题
+     * 
+     * @param resumeText 简历文本
+     * @param questionCount 问题数量
+     * @param historicalQuestions 历史问题列表（可选）
+     * @return 面试问题列表
+     */
+    public List<InterviewQuestionDTO> generateQuestions(String resumeText, int questionCount, List<String> historicalQuestions) {
+        log.info("开始生成面试问题，简历长度: {}, 问题数量: {}, 历史问题数: {}", 
+            resumeText.length(), questionCount, historicalQuestions != null ? historicalQuestions.size() : 0);
+        
+        try {
+            // 加载系统提示词
+            String systemPrompt = systemPromptTemplate.render();
+            
+            // 加载用户提示词并填充变量
+            Map<String, Object> variables = new HashMap<>();
+            variables.put("questionCount", questionCount);
+            variables.put("followUpCount", followUpCount);
+            variables.put("resumeText", resumeText);
+            
+            // 添加历史问题
+            if (historicalQuestions != null && !historicalQuestions.isEmpty()) {
+                String historicalText = String.join("\n", historicalQuestions);
+                variables.put("historicalQuestions", historicalText);
+            } else {
+                variables.put("historicalQuestions", "暂无历史提问");
+            }
+            
+            String userPrompt = userPromptTemplate.render(variables);
+            
+            // 添加格式指令到系统提示词
+            String systemPromptWithFormat = systemPrompt + "\n\n" + outputConverter.getFormat();
+            
+            // 调用AI
+            QuestionListDTO dto;
+            try {
+                dto = structuredOutputInvoker.invoke(
+                    chatClient,
+                    systemPromptWithFormat,
+                    userPrompt,
+                    outputConverter,
+                    ErrorCode.INTERVIEW_QUESTION_GENERATION_FAILED,
+                    "面试问题生成失败：",
+                    "结构化问题生成",
+                    log
+                );
+                log.debug("AI响应解析成功: questions count={}", dto.questions().size());
+            } catch (Exception e) {
+                log.error("面试问题生成AI调用失败: {}", e.getMessage(), e);
+                throw new BusinessException(ErrorCode.INTERVIEW_QUESTION_GENERATION_FAILED, 
+                    "面试问题生成失败：" + e.getMessage());
+            }
+            
+            // 转换为业务对象
+            List<InterviewQuestionDTO> questions = convertToQuestions(dto);
+            log.info("成功生成 {} 个面试问题", questions.size());
+            
+            return questions;
+            
+        } catch (Exception e) {
+            log.error("生成面试问题失败: {}", e.getMessage(), e);
+            // 返回默认问题集
+            return generateDefaultQuestions(questionCount);
+        }
+    }
+
+    /**
+     * 生成面试问题（不带历史问题）
+     */
+    public List<InterviewQuestionDTO> generateQuestions(String resumeText, int questionCount) {
+        return generateQuestions(resumeText, questionCount, null);
+    }
+    
+    /**
+     * 生成面试问题（不带历史问题）
+     */
+    private List<InterviewQuestionDTO> convertToQuestions(QuestionListDTO dto) {
+        List<InterviewQuestionDTO> questions = new ArrayList<>();
+        int index = 0;
+
+        if (dto == null || dto.questions() == null) {
+            return questions;
+        }
+
+        for (QuestionDTO q : dto.questions()) {
+            if (q == null || q.question() == null || q.question().isBlank()) {
+                continue;
+            }
+            QuestionType type = parseQuestionType(q.type());
+            int mainQuestionIndex = index;
+            questions.add(InterviewQuestionDTO.create(index++, q.question(), type, q.category(), false, null));
+
+            List<String> followUps = sanitizeFollowUps(q.followUps());
+            for (int i = 0; i < followUps.size(); i++) {
+                questions.add(InterviewQuestionDTO.create(
+                    index++,
+                    followUps.get(i),
+                    type,
+                    buildFollowUpCategory(q.category(), i + 1),
+                    true,
+                    mainQuestionIndex
+                ));
+            }
+        }
+        
+        return questions;
+    }
+    
+    private QuestionType parseQuestionType(String typeStr) {
+        try {
+            return QuestionType.valueOf(typeStr.toUpperCase());
+        } catch (Exception e) {
+            return QuestionType.JAVA_BASIC;
+        }
+    }
+    
+    /**
+     * 生成默认问题（备用）
+     */
+    private List<InterviewQuestionDTO> generateDefaultQuestions(int count) {
+        List<InterviewQuestionDTO> questions = new ArrayList<>();
+        
+        String[][] defaultQuestions = {
+            {"请介绍一下你在简历中提到的最重要的项目，你在其中承担了什么角色？", "PROJECT", "项目经历"},
+            {"MySQL的索引有哪些类型？B+树索引的原理是什么？", "MYSQL", "MySQL"},
+            {"Redis支持哪些数据结构？各自的使用场景是什么？", "REDIS", "Redis"},
+            {"Java中HashMap的底层实现原理是什么？JDK8做了哪些优化？", "JAVA_COLLECTION", "Java集合"},
+            {"synchronized和ReentrantLock有什么区别？", "JAVA_CONCURRENT", "Java并发"},
+            {"Spring的IoC和AOP原理是什么？", "SPRING", "Spring"},
+            {"MySQL事务的ACID特性是什么？隔离级别有哪些？", "MYSQL", "MySQL"},
+            {"Redis的持久化机制有哪些？RDB和AOF的区别？", "REDIS", "Redis"},
+            {"Java的垃圾回收机制是怎样的？常见的GC算法有哪些？", "JAVA_BASIC", "Java基础"},
+            {"线程池的核心参数有哪些？如何合理配置？", "JAVA_CONCURRENT", "Java并发"},
+        };
+        
+        int index = 0;
+        for (int i = 0; i < Math.min(count, defaultQuestions.length); i++) {
+            String mainQuestion = defaultQuestions[i][0];
+            QuestionType type = QuestionType.valueOf(defaultQuestions[i][1]);
+            String category = defaultQuestions[i][2];
+            questions.add(InterviewQuestionDTO.create(
+                index++,
+                mainQuestion,
+                type,
+                category,
+                false,
+                null
+            ));
+
+            int mainQuestionIndex = index - 1;
+            for (int j = 0; j < followUpCount; j++) {
+                questions.add(InterviewQuestionDTO.create(
+                    index++,
+                    buildDefaultFollowUp(mainQuestion, j + 1),
+                    type,
+                    buildFollowUpCategory(category, j + 1),
+                    true,
+                    mainQuestionIndex
+                ));
+            }
+        }
+        
+        return questions;
+    }
+
+    private List<String> sanitizeFollowUps(List<String> followUps) {
+        if (followUpCount == 0 || followUps == null || followUps.isEmpty()) {
+            return List.of();
+        }
+        return followUps.stream()
+            .filter(item -> item != null && !item.isBlank())
+            .map(String::trim)
+            .limit(followUpCount)
+            .collect(Collectors.toList());
+    }
+
+    private String buildFollowUpCategory(String category, int order) {
+        String baseCategory = (category == null || category.isBlank()) ? "追问" : category;
+        return baseCategory + "（追问" + order + "）";
+    }
+
+    private String buildDefaultFollowUp(String mainQuestion, int order) {
+        if (order == 1) {
+            return "基于“" + mainQuestion + "”，请结合你亲自做过的一个真实场景展开说明。";
+        }
+        return "基于“" + mainQuestion + "”，如果线上出现异常，你会如何定位并给出修复方案？";
+    }
+}
