@@ -6,6 +6,7 @@ import tools.jackson.databind.ObjectMapper;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.infrastructure.export.PdfExportService;
+import interview.guide.infrastructure.file.FileStorageService;
 import interview.guide.infrastructure.mapper.InterviewMapper;
 import interview.guide.modules.interview.model.InterviewAnswerEntity;
 import interview.guide.modules.interview.model.InterviewDetailDTO;
@@ -29,6 +30,7 @@ public class InterviewHistoryService {
 
     private final InterviewPersistenceService interviewPersistenceService;
     private final PdfExportService pdfExportService;
+    private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper;
     private final InterviewMapper interviewMapper;
 
@@ -99,22 +101,45 @@ public class InterviewHistoryService {
             .map(question -> {
                 InterviewAnswerEntity answer = answerMap.get(question.questionIndex());
                 if (answer != null) {
-                    // 用户已回答，使用答案数据
-                    return interviewMapper.toAnswerDetailDTO(answer, extractKeyPoints(answer));
-                } else {
-                    // 用户未回答，构建空答案
                     return new InterviewDetailDTO.AnswerDetailDTO(
+                        answer.getQuestionIndex(),
+                        answer.getQuestion(),
+                        answer.getCategory(),
+                        answer.getUserAnswer(),
+                        answer.getScore(),
+                        answer.getFeedback(),
+                        answer.getEmotion(),
+                        answer.getEmotionScore(),
+                        answer.getSpeechRate(),
+                        answer.getClarityScore(),
+                        answer.getConfidenceScore(),
+                        answer.getAudioKey(),
+                        answer.getAudioKey() != null ? fileStorageService.getFileUrl(answer.getAudioKey()) : null,
+                        answer.getReferenceAnswer(),
+                        extractKeyPoints(answer),
+                        answer.getAnsweredAt()
+                    );
+                }
+
+                // 2. 如果没找到对应的答案，使用题目数据构建一个空答案
+                return new InterviewDetailDTO.AnswerDetailDTO(
                         question.questionIndex(),
                         question.question(),
                         question.category(),
                         null,  // userAnswer
                         question.score() != null ? question.score() : 0,  // score
                         question.feedback(),  // feedback
+                        question.emotion(),
+                        question.emotionScore(),
+                        question.speechRate(),
+                        question.clarityScore(),
+                        question.confidenceScore(),
+                        question.audioKey(),
+                        question.audioKey() != null ? fileStorageService.getFileUrl(question.audioKey()) : null,
                         null,  // referenceAnswer
                         null,  // keyPoints
                         null   // answeredAt
-                    );
-                }
+                );
             })
             .toList();
     }

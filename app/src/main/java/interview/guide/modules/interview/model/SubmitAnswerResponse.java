@@ -7,5 +7,7 @@ public record SubmitAnswerResponse(
     boolean hasNextQuestion,
     InterviewQuestionDTO nextQuestion,
     int currentIndex,
-    int totalQuestions
+    int totalQuestions,
+    String recognizedText,  // 语音识别出的文本
+    String audioUrl         // 语音文件的播放URL
 ) {}

@@ -33,6 +33,13 @@ public record InterviewDetailDTO(
         String userAnswer,
         Integer score,
         String feedback,
+        String emotion,
+        Double emotionScore,
+        Double speechRate,
+        Double clarityScore,
+        Double confidenceScore,
+        String audioKey,
+        String audioUrl,
         String referenceAnswer,
         List<String> keyPoints,
         LocalDateTime answeredAt

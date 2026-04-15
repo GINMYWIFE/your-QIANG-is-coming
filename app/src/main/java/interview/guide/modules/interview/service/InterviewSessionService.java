@@ -3,6 +3,7 @@ package interview.guide.modules.interview.service;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.model.AsyncTaskStatus;
+import interview.guide.infrastructure.file.FileStorageService;
 import interview.guide.infrastructure.redis.InterviewSessionCache;
 import interview.guide.infrastructure.redis.InterviewSessionCache.CachedSession;
 import interview.guide.modules.interview.listener.EvaluateStreamProducer;
@@ -10,7 +11,9 @@ import interview.guide.modules.interview.model.*;
 import interview.guide.modules.interview.model.InterviewSessionDTO.SessionStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
@@ -34,6 +37,8 @@ public class InterviewSessionService {
     private final InterviewSessionCache sessionCache;
     private final ObjectMapper objectMapper;
     private final EvaluateStreamProducer evaluateStreamProducer;
+    private final SpeechServiceClient speechServiceClient;
+    private final FileStorageService fileStorageService;
 
     /**
      * 创建新的面试会话
@@ -189,19 +194,31 @@ public class InterviewSessionService {
      */
     private CachedSession restoreSessionFromEntity(InterviewSessionEntity entity) {
         try {
-            // 解析问题列表
-            List<InterviewQuestionDTO> questions = objectMapper.readValue(
+            log.info("开始从数据库恢复会话: sessionId={}", entity.getSessionId());
+            // 解析问题列表，并确保是可变列表
+            List<InterviewQuestionDTO> initialQuestions = objectMapper.readValue(
                 entity.getQuestionsJson(),
-                new TypeReference<>() {}
+                new TypeReference<List<InterviewQuestionDTO>>() {}
             );
+            List<InterviewQuestionDTO> questions = new java.util.ArrayList<>(initialQuestions);
 
             // 恢复已保存的答案
             List<InterviewAnswerEntity> answers = persistenceService.findAnswersBySessionId(entity.getSessionId());
+            log.info("从数据库恢复了 {} 条答案", answers.size());
+            
             for (InterviewAnswerEntity answer : answers) {
                 int index = answer.getQuestionIndex();
                 if (index >= 0 && index < questions.size()) {
                     InterviewQuestionDTO question = questions.get(index);
-                    questions.set(index, question.withAnswer(answer.getUserAnswer()));
+                    questions.set(index, question.withAnswerAndEmotion(
+                        answer.getUserAnswer(), 
+                        answer.getEmotion(), 
+                        answer.getEmotionScore(),
+                        answer.getSpeechRate(),
+                        answer.getClarityScore(),
+                        answer.getConfidenceScore(),
+                        answer.getAudioKey()
+                    ));
                 }
             }
 
@@ -284,71 +301,113 @@ public class InterviewSessionService {
     }
 
     /**
-     * 提交答案（并进入下一题）
-     * 如果是最后一题，自动触发异步评估
+     * 提交答案（支持文本或语音文件）
      */
-    public SubmitAnswerResponse submitAnswer(SubmitAnswerRequest request) {
-        CachedSession session = getOrRestoreSession(request.sessionId());
+    public SubmitAnswerResponse submitAnswer(String sessionId, Integer questionIndex, String answer, MultipartFile audioFile) {
+        CachedSession session = getOrRestoreSession(sessionId);
         List<InterviewQuestionDTO> questions = session.getQuestions(objectMapper);
 
-        int index = request.questionIndex();
-        if (index < 0 || index >= questions.size()) {
-            throw new BusinessException(ErrorCode.INTERVIEW_QUESTION_NOT_FOUND, "无效的问题索引: " + index);
+        if (questionIndex < 0 || questionIndex >= questions.size()) {
+            throw new BusinessException(ErrorCode.INTERVIEW_QUESTION_NOT_FOUND, "无效的问题索引: " + questionIndex);
         }
 
-        // 更新问题答案
-        InterviewQuestionDTO question = questions.get(index);
-        InterviewQuestionDTO answeredQuestion = question.withAnswer(request.answer());
-        questions.set(index, answeredQuestion);
+        String finalAnswer = answer;
+        String emotion = "中立";
+        Double emotionScore = 1.0;
+        Double speechRate = 0.0;
+        Double clarityScore = 0.8;
+        Double confidenceScore = 0.5;
+        String audioKey = null;
 
-        // 移动到下一题
-        int newIndex = index + 1;
+        // 1. 处理音频（如果存在）
+        if (audioFile != null && !audioFile.isEmpty()) {
+            try {
+                // 保存音频到存储
+                audioKey = fileStorageService.uploadResume(audioFile); // 复用上传逻辑
+                
+                // 调用 ASR + 情感分析
+                SpeechServiceClient.SpeechAnalysisResponse analysis = speechServiceClient
+                    .analyzeSpeech(audioFile.getResource())
+                    .block();
+                
+                if (analysis != null) {
+                    // 如果前端没传文本，使用 ASR 识别结果
+                    if (finalAnswer == null || finalAnswer.isBlank()) {
+                        finalAnswer = (analysis.text() != null && !analysis.text().isBlank()) 
+                            ? analysis.text() 
+                            : "(语音识别未检测到有效内容，请尝试大声说话或检查麦克风)";
+                    }
+                    emotion = analysis.chinese_label();
+                    emotionScore = analysis.emotion_score();
+                    speechRate = analysis.speech_rate();
+                    clarityScore = analysis.clarity_score();
+                    confidenceScore = analysis.confidence_score();
+                    log.info("语音分析完成: text='{}', emotion={}, score={}, rate={}, clarity={}, confidence={}", 
+                        analysis.text(), emotion, emotionScore, speechRate, clarityScore, confidenceScore);
+                }
+            } catch (Exception e) {
+                log.error("处理语音回答失败: {}", e.getMessage(), e);
+            }
+        }
 
-        // 检查是否全部完成
+        if (finalAnswer == null || finalAnswer.isBlank()) {
+            finalAnswer = "(未检测到有效回答)";
+        }
+
+        // 2. 更新问题答案
+        InterviewQuestionDTO question = questions.get(questionIndex);
+        InterviewQuestionDTO answeredQuestion = question.withAnswerAndEmotion(finalAnswer, emotion, emotionScore, speechRate, clarityScore, confidenceScore, audioKey);
+        questions.set(questionIndex, answeredQuestion);
+
+        // 3. 移动到下一题
+        int newIndex = questionIndex + 1;
         boolean hasNextQuestion = newIndex < questions.size();
         InterviewQuestionDTO nextQuestion = hasNextQuestion ? questions.get(newIndex) : null;
-
         SessionStatus newStatus = hasNextQuestion ? SessionStatus.IN_PROGRESS : SessionStatus.COMPLETED;
 
-        // 更新 Redis 缓存
-        sessionCache.updateQuestions(request.sessionId(), questions);
-        sessionCache.updateCurrentIndex(request.sessionId(), newIndex);
+        // 4. 更新缓存与持久化
+        sessionCache.updateQuestions(sessionId, questions);
+        sessionCache.updateCurrentIndex(sessionId, newIndex);
         if (newStatus == SessionStatus.COMPLETED) {
-            sessionCache.updateSessionStatus(request.sessionId(), SessionStatus.COMPLETED);
+            sessionCache.updateSessionStatus(sessionId, SessionStatus.COMPLETED);
         }
 
-        // 保存答案到数据库
         try {
             persistenceService.saveAnswer(
-                request.sessionId(), index,
+                sessionId, questionIndex,
                 question.question(), question.category(),
-                request.answer(), 0, null  // 分数在报告生成时更新
+                finalAnswer, 0, null,
+                emotion, emotionScore,
+                speechRate, clarityScore, confidenceScore,
+                audioKey
             );
-            persistenceService.updateCurrentQuestionIndex(request.sessionId(), newIndex);
-            persistenceService.updateSessionStatus(request.sessionId(),
+            persistenceService.updateCurrentQuestionIndex(sessionId, newIndex);
+            persistenceService.updateSessionStatus(sessionId,
                 newStatus == SessionStatus.COMPLETED
                     ? InterviewSessionEntity.SessionStatus.COMPLETED
                     : InterviewSessionEntity.SessionStatus.IN_PROGRESS);
 
-            // 如果是最后一题，设置评估状态为 PENDING 并触发异步评估
             if (!hasNextQuestion) {
-                persistenceService.updateEvaluateStatus(request.sessionId(), AsyncTaskStatus.PENDING, null);
-                evaluateStreamProducer.sendEvaluateTask(request.sessionId());
-                log.info("会话 {} 已完成所有问题，评估任务已入队", request.sessionId());
+                persistenceService.updateEvaluateStatus(sessionId, AsyncTaskStatus.PENDING, null);
+                evaluateStreamProducer.sendEvaluateTask(sessionId);
             }
         } catch (Exception e) {
-            log.warn("保存答案到数据库失败: {}", e.getMessage());
+            log.warn("保存答案持久化失败: {}", e.getMessage());
         }
 
         log.info("会话 {} 提交答案: 问题{}, 剩余{}题",
-            request.sessionId(), index, questions.size() - newIndex);
+            sessionId, questionIndex, questions.size() - newIndex);
 
-        return new SubmitAnswerResponse(
-            hasNextQuestion,
-            nextQuestion,
-            newIndex,
-            questions.size()
-        );
+        String finalAudioUrl = (audioKey != null) ? fileStorageService.getFileUrl(audioKey) : null;
+        return new SubmitAnswerResponse(hasNextQuestion, nextQuestion, newIndex, questions.size(), finalAnswer, finalAudioUrl);
+    }
+
+    /**
+     * 提交答案（并进入下一题）
+     * 如果是最后一题，自动触发异步评估
+     */
+    public SubmitAnswerResponse submitAnswer(SubmitAnswerRequest request) {
+        return submitAnswer(request.sessionId(), request.questionIndex(), request.answer(), null);
     }
 
     /**
@@ -365,7 +424,33 @@ public class InterviewSessionService {
 
         // 更新问题答案
         InterviewQuestionDTO question = questions.get(index);
-        InterviewQuestionDTO answeredQuestion = question.withAnswer(request.answer());
+        
+        // 情感分析 (如果提供了 audioKey)
+        String emotion = "中立";
+        Double emotionScore = 1.0;
+        Double speechRate = 0.0;
+        Double clarityScore = 0.8;
+        Double confidenceScore = 0.5;
+        String audioKey = request.audioKey();
+        if (audioKey != null && !audioKey.isBlank()) {
+            try {
+                byte[] audioData = fileStorageService.downloadFile(audioKey);
+                SpeechServiceClient.SpeechAnalysisResponse analysis = speechServiceClient
+                    .analyzeSpeech(new ByteArrayResource(audioData))
+                    .block();
+                if (analysis != null) {
+                    emotion = analysis.chinese_label();
+                    emotionScore = analysis.emotion_score();
+                    speechRate = analysis.speech_rate();
+                    clarityScore = analysis.clarity_score();
+                    confidenceScore = analysis.confidence_score();
+                }
+            } catch (Exception e) {
+                log.warn("暂存答案情感分析失败: {}", e.getMessage());
+            }
+        }
+
+        InterviewQuestionDTO answeredQuestion = question.withAnswerAndEmotion(request.answer(), emotion, emotionScore, speechRate, clarityScore, confidenceScore, audioKey);
         questions.set(index, answeredQuestion);
 
         // 更新 Redis 缓存
@@ -381,7 +466,10 @@ public class InterviewSessionService {
             persistenceService.saveAnswer(
                 request.sessionId(), index,
                 question.question(), question.category(),
-                request.answer(), 0, null
+                request.answer(), 0, null,
+                emotion, emotionScore,
+                speechRate, clarityScore, confidenceScore,
+                audioKey
             );
             persistenceService.updateSessionStatus(request.sessionId(),
                 InterviewSessionEntity.SessionStatus.IN_PROGRESS);

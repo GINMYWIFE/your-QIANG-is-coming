@@ -17,6 +17,8 @@ export interface InterviewQuestion {
   userAnswer: string | null;
   score: number | null;
   feedback: string | null;
+  audioKey?: string;
+  audioUrl?: string;
 }
 
 export type QuestionType = 
@@ -48,6 +50,8 @@ export interface SubmitAnswerResponse {
   nextQuestion: InterviewQuestion | null;
   currentIndex: number;
   totalQuestions: number;
+  recognizedText?: string;
+  audioUrl?: string;
 }
 
 export interface CurrentQuestionResponse {
@@ -81,6 +85,13 @@ export interface QuestionEvaluation {
   userAnswer: string;
   score: number;
   feedback: string;
+  emotion?: string;
+  emotionScore?: number;
+  speechRate?: number;
+  clarityScore?: number;
+  confidenceScore?: number;
+  audioKey?: string;
+  audioUrl?: string;
 }
 
 export interface ReferenceAnswer {

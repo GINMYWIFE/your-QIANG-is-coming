@@ -33,16 +33,40 @@ export const interviewApi = {
   },
 
   /**
-   * 提交答案
+   * 提交答案（支持文本或语音文件）
    */
-  async submitAnswer(req: SubmitAnswerRequest): Promise<SubmitAnswerResponse> {
+  async submitAnswer(req: SubmitAnswerRequest, audioFile?: Blob): Promise<SubmitAnswerResponse> {
+    const formData = new FormData();
+    formData.append('questionIndex', req.questionIndex.toString());
+    if (req.answer) {
+      formData.append('answer', req.answer);
+    }
+    if (audioFile) {
+      formData.append('audio', audioFile, 'answer.wav');
+    }
+
     return request.post<SubmitAnswerResponse>(
       `/api/interview/sessions/${req.sessionId}/answers`,
-      { questionIndex: req.questionIndex, answer: req.answer },
+      formData,
       {
-        timeout: 180000, // 3分钟超时
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        timeout: 300000, // 5分钟超时，ASR+AI评估可能需要更长时间
       }
     );
+  },
+
+  /**
+   * 仅语音转文字（ASR）
+   */
+  async recognizeSpeech(audioFile: Blob): Promise<{ text: string }> {
+    const formData = new FormData();
+    formData.append('audio', audioFile, 'recognize.wav');
+    return request.post<{ text: string }>('/api/interview/speech/recognize', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000
+    });
   },
 
   /**

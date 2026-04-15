@@ -56,9 +56,10 @@ spring:
       api-key: ${AI_BAILIAN_API_KEY}
       chat:
         options:
-          model: ${AI_MODEL:qwen-plus}
+          # 优先使用免费额度较大的 qwen-turbo 模型 (2,000,000 token 免费额度)
+          model: ${AI_MODEL:qwen-turbo}
           temperature: 0.2
-      # Embedding模型配置 - 使用text-embedding-v3
+      # Embedding模型配置 
       embedding:
         options:
           model: text-embedding-v3

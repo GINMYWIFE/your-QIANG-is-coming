@@ -15,9 +15,9 @@ services:
     image: pgvector/pgvector:pg16
     container_name: interview-postgres
     environment:
-      POSTGRES_USER: postgres
+      POSTGRES_USER: postgres # 数据库用户名  
       POSTGRES_PASSWORD: password
-      POSTGRES_DB: interview_guide
+      POSTGRES_DB: interview_guide # 数据库名称
     volumes:
       # 数据持久化：确保容器重启或删除后，数据库数据不丢失
       - postgres_data:/var/lib/postgresql/data
@@ -29,7 +29,7 @@ services:
     # 后端服务(app)需要等待数据库完全启动并准备好连接后才能启动。
     # 这里通过 pg_isready 命令检测数据库状态。
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U postgres"] # 检查数据库是否准备就绪
       interval: 5s
       timeout: 5s
       retries: 5
@@ -48,14 +48,14 @@ services:
     image: redis:7
     container_name: interview-redis
     ports:
-      - "6379:6379"
+      - "6379:6379" #端口映射
     volumes:
-      - redis_data:/data
+      - redis_data:/data # 数据持久化：确保容器重启或删除后，Redis 数据不丢失
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+      test: ["CMD", "redis-cli", "ping"] # 检查 Redis 是否响应
+      interval: 5s # 检查间隔：5秒检查一次Redis状态
+      timeout: 3s # 超时时间：3秒内未响应则认为Redis不可用
+      retries: 5 # 最大重试次数：5次重试后认为Redis不可用
 
   # =========================================
   # 3. MinIO 对象存储服务
@@ -74,9 +74,10 @@ services:
     container_name: interview-minio
     # 启动命令：指定数据目录和控制台地址
     command: server /data --console-address ":9001"
+    # 启动 MinIO 服务，指定数据目录和控制台端口为 9000 和 9001
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: minioadmin # MinIO 管理员用户名
+      MINIO_ROOT_PASSWORD: minioadmin # MinIO 管理员密码
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -100,7 +101,7 @@ services:
   #   - 解决了"谁来创建 Bucket"的问题，实现了基础设施的自动化配置，无需手动操作。
   # =========================================
   createbuckets:
-    image: minio/mc
+    image: minio/mc # MinIO 客户端镜像，用于创建存储桶
     depends_on:
       minio:
         condition: service_healthy # 必须等待 MinIO 服务健康（不仅仅是启动）
@@ -119,13 +120,13 @@ services:
   # 5. 后端应用服务 (Spring Boot)
   # -----------------------------------------
   # 作用：
-  #   - 提供 RESTful API
+  #   - 提供 RESTful API 接口，用于前端调用
   #   - 处理核心业务逻辑（简历分析、模拟面试、RAG）
   # =========================================
   app:
     build:
-      context: .
-      dockerfile: app/Dockerfile
+      context: . # 构建上下文目录，即当前目录
+      dockerfile: app/Dockerfile # 构建 Dockerfile 路径，即 app 目录下的 Dockerfile
     container_name: interview-app
     # 依赖管理：确保基础设施准备好后再启动后端
     depends_on:
@@ -137,6 +138,8 @@ services:
         condition: service_healthy
       createbuckets:
         condition: service_completed_successfully # 等待初始化任务完成
+      emotion-service:
+        condition: service_started # 情感识别服务
     environment:
       # === 数据库连接 ===
       # 使用服务名 'postgres' 作为主机名，Docker 内部 DNS 会自动解析
@@ -147,42 +150,67 @@ services:
       POSTGRES_PASSWORD: password
       
       # === Redis 连接 ===
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      REDIS_HOST: redis # Redis 服务名，Docker 内部 DNS 会自动解析
+      REDIS_PORT: 6379 # Redis 端口号
       
       # === 对象存储配置 ===
       # 注意：后端在容器内访问 MinIO，使用 http://minio:9000
-      APP_STORAGE_ENDPOINT: http://minio:9000
-      APP_STORAGE_ACCESS_KEY: minioadmin
-      APP_STORAGE_SECRET_KEY: minioadmin
-      APP_STORAGE_BUCKET: interview-guide
-      APP_STORAGE_REGION: us-east-1
+      APP_STORAGE_ENDPOINT: http://minio:9000 # MinIO 服务端点
+      APP_STORAGE_ACCESS_KEY: minioadmin # MinIO 访问密钥
+      APP_STORAGE_SECRET_KEY: minioadmin # MinIO 密钥
+      APP_STORAGE_BUCKET: interview-guide # 存储桶名称，用于存储用户上传的文件
+      APP_STORAGE_REGION: us-east-1 # 区域，用于 MinIO 服务，默认值为 us-east-1
       
       # === AI 模型配置 (必须配置) ===
       # 这里的变量值来自宿主机的环境变量或 .env 文件
       AI_BAILIAN_API_KEY: ${AI_BAILIAN_API_KEY}
-      AI_MODEL: ${AI_MODEL:-qwen-plus}
+      # 优先使用免费额度较大的 qwen-turbo 模型 (2,000,000 token 免费额度)
+      AI_MODEL: ${AI_MODEL:-qwen-turbo}
+
+      # === 语音分析服务配置 ===
+      APP_SPEECH_SERVICE_URL: http://emotion-service:8000/analyze
 
       # === 面试参数配置 ===
       APP_INTERVIEW_FOLLOW_UP_COUNT: ${APP_INTERVIEW_FOLLOW_UP_COUNT:-1}
-      APP_INTERVIEW_EVALUATION_BATCH_SIZE: ${APP_INTERVIEW_EVALUATION_BATCH_SIZE:-8}
+      # 面试后跟进次数，默认值为 1
+      APP_INTERVIEW_EVALUATION_BATCH_SIZE: ${APP_INTERVIEW_EVALUATION_BATCH_SIZE:-8} 
+      # 面试评估批量大小，默认值为 8
     ports:
-      - "8080:8080"
+      - "8080:8080" # 映射容器端口 8080 到主机端口 8080
 
   # =========================================
-  # 6. 前端应用服务 (Vue/React + Nginx)
+  # 6. 语音智能识别服务 (FastAPI + Paraformer + emotion2vec)
+  # -----------------------------------------
+  # 作用：
+  #   - ASR 语音转文字
+  #   - 分析面试者的录音情绪（自信、紧张、愤怒等）
+  # =========================================
+  emotion-service:
+    build: ./emotion-service
+    container_name: interview-emotion
+    environment:
+      - AI_BAILIAN_API_KEY=${AI_BAILIAN_API_KEY}
+    deploy:
+      resources:
+        limits:
+          memory: 1G # 已切换为云端 API，大幅降低内存需求
+    ports:
+      - "8000:8000"
+
+  # =========================================
+  # 7. 前端应用服务 (Vue/React + Nginx)
   # -----------------------------------------
   # 作用：
   #   - 提供用户界面
   #   - 反向代理 API 请求（通常在 Nginx 配置中处理）
   # =========================================
   frontend:
-    build: ./frontend
+    build: ./frontend 
     container_name: interview-frontend
     depends_on:
-      - app
+      - app # 等待后端服务启动完成
     ports:
-      - "80:80"
+      - "80:80" # 映射容器端口 80 到主机端口 80
 
 # =========================================
 # 定义 Docker 卷 (Volumes)
@@ -194,3 +222,4 @@ volumes:
   postgres_data:
   redis_data:
   minio_data:
+  emotion_model_data: # 新增语音模型持久化卷

@@ -11,6 +11,12 @@ public record InterviewQuestionDTO(
     String userAnswer,    // 用户回答
     Integer score,        // 单题得分 (0-100)
     String feedback,      // 单题反馈
+    String emotion,       // 情感识别结果
+    Double emotionScore,  // 情感置信度
+    Double speechRate,    // 语速 (字/秒)
+    Double clarityScore,  // 语言清晰度 (0-1)
+    Double confidenceScore, // 自信度 (0-1)
+    String audioKey,      // 语音文件在 MinIO 中的 Key
     boolean isFollowUp,   // 是否为追问
     Integer parentQuestionIndex // 追问关联的主问题索引
 ) {
@@ -29,7 +35,7 @@ public record InterviewQuestionDTO(
      * 创建新问题（未回答状态）
      */
     public static InterviewQuestionDTO create(int index, String question, QuestionType type, String category) {
-        return new InterviewQuestionDTO(index, question, type, category, null, null, null, false, null);
+        return new InterviewQuestionDTO(index, question, type, category, null, null, null, null, null, null, null, null, null, false, null);
     }
 
     /**
@@ -42,7 +48,7 @@ public record InterviewQuestionDTO(
             String category,
             boolean isFollowUp,
             Integer parentQuestionIndex) {
-        return new InterviewQuestionDTO(index, question, type, category, null, null, null, isFollowUp, parentQuestionIndex);
+        return new InterviewQuestionDTO(index, question, type, category, null, null, null, null, null, null, null, null, null, isFollowUp, parentQuestionIndex);
     }
     
     /**
@@ -50,7 +56,15 @@ public record InterviewQuestionDTO(
      */
     public InterviewQuestionDTO withAnswer(String answer) {
         return new InterviewQuestionDTO(
-            questionIndex, question, type, category, answer, score, feedback, isFollowUp, parentQuestionIndex);
+            questionIndex, question, type, category, answer, score, feedback, emotion, emotionScore, speechRate, clarityScore, confidenceScore, audioKey, isFollowUp, parentQuestionIndex);
+    }
+
+    /**
+     * 添加回答和情感信息
+     */
+    public InterviewQuestionDTO withAnswerAndEmotion(String answer, String emotion, Double emotionScore, Double speechRate, Double clarityScore, Double confidenceScore, String audioKey) {
+        return new InterviewQuestionDTO(
+            questionIndex, question, type, category, answer, score, feedback, emotion, emotionScore, speechRate, clarityScore, confidenceScore, audioKey, isFollowUp, parentQuestionIndex);
     }
     
     /**
@@ -58,6 +72,6 @@ public record InterviewQuestionDTO(
      */
     public InterviewQuestionDTO withEvaluation(int score, String feedback) {
         return new InterviewQuestionDTO(
-            questionIndex, question, type, category, userAnswer, score, feedback, isFollowUp, parentQuestionIndex);
+            questionIndex, question, type, category, userAnswer, score, feedback, emotion, emotionScore, speechRate, clarityScore, confidenceScore, audioKey, isFollowUp, parentQuestionIndex);
     }
 }

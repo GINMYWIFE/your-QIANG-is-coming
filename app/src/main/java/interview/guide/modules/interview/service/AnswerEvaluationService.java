@@ -176,8 +176,18 @@ public class AnswerEvaluationService {
         for (InterviewQuestionDTO q : questions) {
             sb.append(String.format("问题%d [%s]: %s\n", 
                 q.questionIndex() + 1, q.category(), q.question()));
-            sb.append(String.format("回答: %s\n\n", 
-                q.userAnswer() != null ? q.userAnswer() : "(未回答)"));
+            // 补充语音素质分析
+            String speechAnalysis = "";
+            if (q.emotion() != null) {
+                speechAnalysis = String.format(" [语音特征: 情感=%s, 语速=%.1f字/秒, 清晰度=%.2f, 自信度=%.2f]", 
+                    q.emotion(), q.speechRate(), q.clarityScore(), q.confidenceScore());
+            }
+            
+            String answerText = (q.userAnswer() != null && !q.userAnswer().isBlank()) 
+                ? q.userAnswer() + speechAnalysis
+                : "(未回答)";
+            
+            sb.append(String.format("回答: %s\n\n", answerText));
         }
         return sb.toString();
     }
@@ -442,7 +452,10 @@ public class AnswerEvaluationService {
 
             questionDetails.add(new QuestionEvaluation(
                 qIndex, q.question(), q.category(),
-                q.userAnswer(), score, feedback
+                q.userAnswer(), score, feedback,
+                q.emotion(), q.emotionScore(),
+                q.speechRate(), q.clarityScore(), q.confidenceScore(),
+                q.audioKey()
             ));
 
             referenceAnswers.add(new ReferenceAnswer(

@@ -14,6 +14,7 @@ interface Message {
   content: string;
   category?: string;
   questionIndex?: number;
+  audioUrl?: string;
 }
 
 interface InterviewProps {
@@ -115,7 +116,8 @@ export default function Interview({ resumeText, resumeId, onBack, onInterviewCom
         if (q.userAnswer) {
           restoredMessages.push({
             type: 'user',
-            content: q.userAnswer
+            content: q.userAnswer,
+            audioUrl: q.audioUrl
           });
         }
       }
@@ -176,34 +178,65 @@ export default function Interview({ resumeText, resumeId, onBack, onInterviewCom
     }
   };
 
-    const handleSubmitAnswer = async () => {
-    if (!answer.trim() || !session || !currentQuestion) return;
+    const handleSubmitAnswer = async (audioBlob?: Blob) => {
+    // 如果没有音频也没有文本，则不提交
+    if (!answer.trim() && !audioBlob && !session && !currentQuestion) return;
 
     setIsSubmitting(true);
 
+    // 如果有音频且没有文本，先显示一个占位消息
     const userMessage: Message = {
       type: 'user',
-      content: answer
+      content: answer || (audioBlob ? '正在上传语音并识别...' : '')
     };
     setMessages(prev => [...prev, userMessage]);
 
     try {
       const response = await interviewApi.submitAnswer({
-        sessionId: session.sessionId,
-        questionIndex: currentQuestion.questionIndex,
+        sessionId: session!.sessionId,
+        questionIndex: currentQuestion!.questionIndex,
         answer: answer.trim()
-      });
+      }, audioBlob);
+
+      // 如果后端 ASR 识别出了内容或有语音URL，更新最后一条消息
+      if (response.recognizedText || response.audioUrl) {
+        setMessages(prev => {
+          const newMessages = [...prev];
+          // 查找最后一条用户消息的索引
+          let lastUserMsgIndex = -1;
+          for (let i = newMessages.length - 1; i >= 0; i--) {
+            if (newMessages[i].type === 'user') {
+              lastUserMsgIndex = i;
+              break;
+            }
+          }
+          
+          if (lastUserMsgIndex !== -1) {
+            newMessages[lastUserMsgIndex] = {
+              ...newMessages[lastUserMsgIndex],
+              content: response.recognizedText || newMessages[lastUserMsgIndex].content,
+              audioUrl: response.audioUrl || newMessages[lastUserMsgIndex].audioUrl
+            };
+          }
+          return newMessages;
+        });
+      }
 
       setAnswer('');
 
-      if (response.hasNextQuestion && response.nextQuestion) {
-        setCurrentQuestion(response.nextQuestion);
-        setMessages(prev => [...prev, {
-          type: 'interviewer',
-          content: response.nextQuestion!.question,
-          category: response.nextQuestion!.category,
-          questionIndex: response.nextQuestion!.questionIndex
-        }]);
+      if (response.hasNextQuestion) {
+        if (response.nextQuestion) {
+          setCurrentQuestion(response.nextQuestion);
+          setMessages(prev => [...prev, {
+            type: 'interviewer',
+            content: response.nextQuestion!.question,
+            category: response.nextQuestion!.category,
+            questionIndex: response.nextQuestion!.questionIndex
+          }]);
+        } else {
+          // 容错：虽然有下一题但没返回，尝试获取当前状态
+          console.warn('hasNextQuestion is true but nextQuestion is null');
+        }
       } else {
         // 面试已完成，评估将在后台进行，跳转到面试记录页
         onInterviewComplete();

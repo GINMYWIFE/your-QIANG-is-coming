@@ -47,6 +47,24 @@ public class InterviewAnswerEntity {
     // 反馈
     @Column(columnDefinition = "TEXT")
     private String feedback;
+
+    // 情感识别结果 (如：自信、紧张、中立)
+    private String emotion;
+
+    // 情感置信度 (0-1)
+    private Double emotionScore;
+    
+    // 语速 (字/秒)
+    private Double speechRate;
+    
+    // 语言清晰度 (0-1)
+    private Double clarityScore;
+    
+    // 自信度 (0-1)
+    private Double confidenceScore;
+    
+    // 语音文件在 MinIO 中的 Key
+    private String audioKey;
     
     // 参考答案
     @Column(columnDefinition = "TEXT")
@@ -128,6 +146,54 @@ public class InterviewAnswerEntity {
     
     public void setFeedback(String feedback) {
         this.feedback = feedback;
+    }
+
+    public String getEmotion() {
+        return emotion;
+    }
+
+    public void setEmotion(String emotion) {
+        this.emotion = emotion;
+    }
+
+    public Double getEmotionScore() {
+        return emotionScore;
+    }
+
+    public void setEmotionScore(Double emotionScore) {
+        this.emotionScore = emotionScore;
+    }
+
+    public Double getSpeechRate() {
+        return speechRate;
+    }
+
+    public void setSpeechRate(Double speechRate) {
+        this.speechRate = speechRate;
+    }
+
+    public Double getClarityScore() {
+        return clarityScore;
+    }
+
+    public void setClarityScore(Double clarityScore) {
+        this.clarityScore = clarityScore;
+    }
+
+    public Double getConfidenceScore() {
+        return confidenceScore;
+    }
+
+    public void setConfidenceScore(Double confidenceScore) {
+        this.confidenceScore = confidenceScore;
+    }
+
+    public String getAudioKey() {
+        return audioKey;
+    }
+
+    public void setAudioKey(String audioKey) {
+        this.audioKey = audioKey;
     }
     
     public String getReferenceAnswer() {

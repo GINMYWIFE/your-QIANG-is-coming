@@ -1,7 +1,8 @@
-import {useMemo, useState} from 'react';
+import {useMemo, useState, useRef} from 'react';
 import {AnimatePresence, motion} from 'framer-motion';
 import {getScoreColor} from '../utils/score';
 import type {InterviewDetail} from '../api/history';
+import {Play, Pause} from 'lucide-react';
 
 interface InterviewDetailPanelProps {
   interview: InterviewDetail;
@@ -135,6 +136,46 @@ function ScoreCard({
           {feedback || '表现良好，展示了扎实的技术基础。'}
         </p>
       </div>
+    </div>
+  );
+}
+
+// 语音播放器组件
+function AudioPlayer({ url }: { url: string }) {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const togglePlay = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!audioRef.current) return;
+
+    if (isPlaying) {
+      audioRef.current.pause();
+    } else {
+      audioRef.current.play();
+    }
+    setIsPlaying(!isPlaying);
+  };
+
+  return (
+    <div className="flex-shrink-0">
+      <button
+        onClick={togglePlay}
+        className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+          isPlaying 
+            ? 'bg-primary-500 text-white shadow-lg shadow-primary-500/30' 
+            : 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 border border-primary-100 dark:border-primary-800 hover:bg-primary-50 dark:hover:bg-primary-900/30'
+        }`}
+        title={isPlaying ? "暂停录音" : "播放录音"}
+      >
+        {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
+      </button>
+      <audio
+        ref={audioRef}
+        src={url}
+        onEnded={() => setIsPlaying(false)}
+        className="hidden"
+      />
     </div>
   );
 }
@@ -302,13 +343,53 @@ function QuestionCard({
                   </svg>
                   你的回答
                 </p>
-                <p className={`leading-relaxed ${
-                  !answer.userAnswer || answer.userAnswer === '不知道' 
-                    ? 'text-red-500 font-medium'
-                      : 'text-slate-700 dark:text-slate-300'
-                }`}>
-                  "{answer.userAnswer || '(未回答)'}"
-                </p>
+                <div className="flex justify-between items-start gap-4">
+                  <p className={`flex-1 leading-relaxed ${
+                    !answer.userAnswer || answer.userAnswer === '不知道' 
+                      ? 'text-red-500 font-medium'
+                        : 'text-slate-700 dark:text-slate-300'
+                  }`}>
+                    "{answer.userAnswer || '(未回答)'}"
+                  </p>
+                  {answer.audioUrl && (
+                    <AudioPlayer url={answer.audioUrl} />
+                  )}
+                </div>
+
+                {/* 语音分析结果 */}
+                {answer.emotion && (
+                  <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-600 grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">情感表达</p>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">{answer.emotion}</span>
+                        <span className="text-[10px] text-slate-400">({Math.round(answer.emotionScore * 100)}%)</span>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">语速</p>
+                      <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{answer.speechRate?.toFixed(1)} <span className="text-[10px] font-normal text-slate-400">字/秒</span></p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">清晰度</p>
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-1 bg-slate-200 dark:bg-slate-600 rounded-full overflow-hidden max-w-[40px]">
+                          <div className="h-full bg-blue-500" style={{ width: `${(answer.clarityScore || 0) * 100}%` }} />
+                        </div>
+                        <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">{Math.round((answer.clarityScore || 0) * 100)}%</span>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">自信度</p>
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-1 bg-slate-200 dark:bg-slate-600 rounded-full overflow-hidden max-w-[40px]">
+                          <div className="h-full bg-emerald-500" style={{ width: `${(answer.confidenceScore || 0) * 100}%` }} />
+                        </div>
+                        <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">{Math.round((answer.confidenceScore || 0) * 100)}%</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* AI 深度评价 */}

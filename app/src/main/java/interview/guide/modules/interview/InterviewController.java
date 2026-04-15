@@ -13,6 +13,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -60,18 +61,19 @@ public class InterviewController {
     }
     
     /**
-     * 提交答案
+     * 提交答案（支持文本或语音文件）
      */
-    @PostMapping("/api/interview/sessions/{sessionId}/answers")
+    @PostMapping(value = "/api/interview/sessions/{sessionId}/answers", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @RateLimit(dimensions = {RateLimit.Dimension.GLOBAL}, count = 10)
     public Result<SubmitAnswerResponse> submitAnswer(
             @PathVariable String sessionId,
-            @RequestBody Map<String, Object> body) {
-        Integer questionIndex = (Integer) body.get("questionIndex");
-        String answer = (String) body.get("answer");
-        log.info("提交答案: 会话{}, 问题{}", sessionId, questionIndex);
-        SubmitAnswerRequest request = new SubmitAnswerRequest(sessionId, questionIndex, answer);
-        SubmitAnswerResponse response = sessionService.submitAnswer(request);
+            @RequestParam("questionIndex") Integer questionIndex,
+            @RequestParam(value = "answer", required = false) String answer,
+            @RequestParam(value = "audio", required = false) MultipartFile audioFile) {
+        
+        log.info("提交答案: 会话{}, 问题{}, 是否包含音频: {}", sessionId, questionIndex, audioFile != null);
+        
+        SubmitAnswerResponse response = sessionService.submitAnswer(sessionId, questionIndex, answer, audioFile);
         return Result.success(response);
     }
     
@@ -104,7 +106,7 @@ public class InterviewController {
         Integer questionIndex = (Integer) body.get("questionIndex");
         String answer = (String) body.get("answer");
         log.info("暂存答案: 会话{}, 问题{}", sessionId, questionIndex);
-        SubmitAnswerRequest request = new SubmitAnswerRequest(sessionId, questionIndex, answer);
+        SubmitAnswerRequest request = new SubmitAnswerRequest(sessionId, questionIndex, answer, null);
         sessionService.saveAnswer(request);
         return Result.success(null);
     }

@@ -34,7 +34,13 @@ public record InterviewReportDTO(
         String category,
         String userAnswer,
         int score,
-        String feedback
+        String feedback,
+        String emotion,
+        Double emotionScore,
+        Double speechRate,
+        Double clarityScore,
+        Double confidenceScore,
+        String audioKey
     ) {}
     
     /**

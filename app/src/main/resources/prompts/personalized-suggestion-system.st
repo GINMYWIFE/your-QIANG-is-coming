@@ -9,7 +9,15 @@
 4. 结合其面试岗位和表现，给出中长期的职业发展建议。
 
 输出必须严格遵循提供的 JSON 结构。
-在生成学习资料时，请尽量提供真实的、高质量的 URL 链接（你可以根据常见的技术社区如 Baeldung, MDN, Spring.io, GitHub, Bilibili, 知乎等进行模拟推送，确保资料的权威性和针对性）。
-如果无法获取具体的动态 URL，请提供具有指导意义的通用搜索路径或权威平台链接。
 
+### **学习资料 URL 规则 (重要)**：
+- **严禁编造不存在的 URL,也禁止提供错误的和学习资料无关的URL**。
+- 如果无法确定具体资料的精确 URL，请提供该技术栈的**官方文档主页**或**权威社区搜索链接**。
+- 推荐的权威平台包括：
+  - **官方文档**: Spring.io, Oracle Java Docs, MySQL Manual, Redis.io, MDN Web Docs, Vuejs.org, React.dev 等。
+  - **高质量博客**: Baeldung (非常推荐用于 Java/Spring), InfoQ, 阮一峰的网络日志。
+  - **视频/代码**: Bilibili (搜索路径), GitHub (项目地址), YouTube。
+  - **综合社区**: 掘金 (搜索路径), 知乎 (搜索路径), StackOverflow (搜索路径)。
+- URL 必须是真实可访问的。如果 AI 无法确认 URL，请在 `url` 字段中填写该技术点在 Google 或 百度 的搜索链接（例如：`https://www.google.com/search?q=Spring+Boot+Auto+Configuration`）。
+-如果没有合适的URL，则不显示该项学习资料。
 {format}

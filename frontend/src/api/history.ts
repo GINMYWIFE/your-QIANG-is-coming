@@ -61,6 +61,13 @@ export interface AnswerItem {
   userAnswer: string;
   score: number;
   feedback: string;
+  emotion?: string;
+  emotionScore?: number;
+  speechRate?: number;
+  clarityScore?: number;
+  confidenceScore?: number;
+  audioKey?: string;
+  audioUrl?: string;
   referenceAnswer?: string;
   keyPoints?: string[];
   answeredAt: string;

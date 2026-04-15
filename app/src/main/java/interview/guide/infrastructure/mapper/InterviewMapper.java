@@ -28,6 +28,7 @@ public interface InterviewMapper {
     @Mapping(target = "userAnswer", source = "userAnswer")
     @Mapping(target = "score", source = "score", qualifiedByName = "nullScoreToZero")
     @Mapping(target = "feedback", source = "feedback")
+    @Mapping(target = "audioKey", source = "audioKey")
     InterviewReportDTO.QuestionEvaluation toQuestionEvaluation(InterviewAnswerEntity entity);
 
     /**
@@ -42,6 +43,7 @@ public interface InterviewMapper {
      * 注意：keyPoints 需要从 JSON 解析后传入
      */
     @Mapping(target = "keyPoints", source = "keyPoints")
+    @Mapping(target = "audioKey", source = "entity.audioKey")
     InterviewDetailDTO.AnswerDetailDTO toAnswerDetailDTO(
         InterviewAnswerEntity entity,
         List<String> keyPoints

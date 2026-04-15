@@ -126,7 +126,10 @@ public class InterviewPersistenceService {
     @Transactional(rollbackFor = Exception.class)
     public InterviewAnswerEntity saveAnswer(String sessionId, int questionIndex,
                                             String question, String category,
-                                            String userAnswer, int score, String feedback) {
+                                            String userAnswer, int score, String feedback,
+                                            String emotion, Double emotionScore,
+                                            Double speechRate, Double clarityScore, Double confidenceScore,
+                                            String audioKey) {
         Optional<InterviewSessionEntity> sessionOpt = sessionRepository.findBySessionId(sessionId);
         if (sessionOpt.isEmpty()) {
             throw new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND);
@@ -146,10 +149,16 @@ public class InterviewPersistenceService {
         answer.setUserAnswer(userAnswer);
         answer.setScore(score);
         answer.setFeedback(feedback);
+        answer.setEmotion(emotion);
+        answer.setEmotionScore(emotionScore);
+        answer.setSpeechRate(speechRate);
+        answer.setClarityScore(clarityScore);
+        answer.setConfidenceScore(confidenceScore);
+        answer.setAudioKey(audioKey);
 
         InterviewAnswerEntity saved = answerRepository.save(answer);
-        log.info("面试答案已保存: sessionId={}, questionIndex={}, score={}", 
-                sessionId, questionIndex, score);
+        log.info("面试答案已保存: sessionId={}, questionIndex={}, score={}, emotion={}, speechRate={}, clarity={}, confidence={}, audioKey={}", 
+                sessionId, questionIndex, score, emotion, speechRate, clarityScore, confidenceScore, audioKey);
         
         return saved;
     }
