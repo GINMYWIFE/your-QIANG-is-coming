@@ -24,6 +24,7 @@ interface InterviewProps {
     questionCount?: number;
     llmProvider?: string;
     skillId?: string;
+    knowledgeBaseId?: number;
     difficulty?: Difficulty;
     customCategories?: CategoryDTO[];
     jdText?: string;
@@ -53,6 +54,7 @@ export default function Interview({
   const questionCount = initialConfig?.questionCount ?? 8;
   const llmProvider = initialConfig?.llmProvider ?? 'dashscope';
   const skillId = initialConfig?.skillId ?? 'java-backend';
+  const knowledgeBaseId = initialConfig?.knowledgeBaseId;
   const difficulty = initialConfig?.difficulty ?? 'mid';
   const customCategories = initialConfig?.customCategories;
   const jdText = initialConfig?.jdText;
@@ -75,21 +77,28 @@ export default function Interview({
     setError('');
 
     try {
-      const newSession = await interviewApi.createSession({
-        resumeText,
-        questionCount,
-        resumeId,
-        forceCreate: true,
-        llmProvider,
-        skillId,
-        difficulty,
-        customCategories: skillId === CUSTOM_SKILL_ID ? customCategories : undefined,
-        jdText: skillId === CUSTOM_SKILL_ID ? jdText : undefined,
-      });
+      const newSession = await Promise.race([
+        interviewApi.createSession({
+          resumeText,
+          questionCount,
+          resumeId,
+          knowledgeBaseId,
+          forceCreate: true,
+          llmProvider,
+          skillId,
+          difficulty,
+          customCategories: skillId === CUSTOM_SKILL_ID ? customCategories : undefined,
+          jdText: skillId === CUSTOM_SKILL_ID ? jdText : undefined,
+        }),
+        new Promise<never>((_, reject) => {
+          window.setTimeout(() => reject(new Error('timeout')), 150000);
+        }),
+      ]);
 
       initSession(newSession);
     } catch (err) {
-      setError('创建面试失败，请重试');
+      const isTimeout = err instanceof Error && err.message === 'timeout';
+      setError(isTimeout ? '生成面试题超时，请重试' : '创建面试失败，请重试');
       console.error(err);
     } finally {
       setIsCreating(false);
@@ -101,7 +110,12 @@ export default function Interview({
     setError('');
 
     try {
-      const existingSession = await interviewApi.getSession(sessionId);
+      const existingSession = await Promise.race([
+        interviewApi.getSession(sessionId),
+        new Promise<never>((_, reject) => {
+          window.setTimeout(() => reject(new Error('timeout')), 150000);
+        }),
+      ]);
       initSession(existingSession);
 
       // 恢复已填写的答案
@@ -110,7 +124,8 @@ export default function Interview({
         setAnswer(currentQ.userAnswer);
       }
     } catch (err) {
-      setError('恢复面试失败，请重试');
+      const isTimeout = err instanceof Error && err.message === 'timeout';
+      setError(isTimeout ? '恢复会话超时，请重试' : '恢复面试失败，请重试');
       console.error(err);
     } finally {
       setIsCreating(false);

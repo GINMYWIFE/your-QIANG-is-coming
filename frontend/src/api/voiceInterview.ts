@@ -5,6 +5,7 @@ import { request } from './request';
 export interface CreateSessionRequest {
   roleType?: string;
   skillId: string;
+  knowledgeBaseId?: number;
   difficulty?: string;
   customJdText?: string;
   resumeId?: number;

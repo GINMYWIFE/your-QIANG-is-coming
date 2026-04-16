@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { skillApi, type SkillDTO, type CategoryDTO } from '../api/skill';
 import { historyApi, type ResumeListItem } from '../api/history';
+import { knowledgeBaseApi, type KnowledgeBaseItem } from '../api/knowledgebase';
 import { getSkillIcon } from '../utils/skillIcons';
 import { loadInterviewPreferences } from '../utils/interviewPreferences';
 
 export type InterviewMode = 'text' | 'voice';
+export type InterviewDirectionMode = 'skill' | 'kb';
 export type Difficulty = 'junior' | 'mid' | 'senior';
 
 export const DIFFICULTY_OPTIONS: { value: Difficulty; label: string; desc: string }[] = [
@@ -20,10 +22,14 @@ export const MIN_JD_LENGTH = 50;
 
 export interface InterviewConfigState {
   mode: InterviewMode;
+  directionMode: InterviewDirectionMode;
   skillId: string;
+  knowledgeBaseId: number | undefined;
   difficulty: Difficulty;
   skills: SkillDTO[];
+  knowledgeBases: KnowledgeBaseItem[];
   loadingSkills: boolean;
+  loadingKBs: boolean;
   showMore: boolean;
   resumeId: number | undefined;
   resumes: ResumeListItem[];
@@ -47,10 +53,14 @@ export function useInterviewConfig(options?: {
   const preferences = loadInterviewPreferences();
 
   const [mode, setMode] = useState<InterviewMode>(defaultMode);
+  const [directionMode, setDirectionMode] = useState<InterviewDirectionMode>('skill');
   const [skillId, setSkillId] = useState(DEFAULT_SKILL_ID);
+  const [knowledgeBaseId, setKnowledgeBaseId] = useState<number | undefined>(undefined);
   const [difficulty, setDifficulty] = useState<Difficulty>('mid');
   const [skills, setSkills] = useState<SkillDTO[]>([]);
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseItem[]>([]);
   const [loadingSkills, setLoadingSkills] = useState(false);
+  const [loadingKBs, setLoadingKBs] = useState(false);
   const [showMore, setShowMore] = useState(false);
   const [resumeId, setResumeId] = useState<number | undefined>(undefined);
   const [resumes, setResumes] = useState<ResumeListItem[]>([]);
@@ -62,10 +72,14 @@ export function useInterviewConfig(options?: {
   const [customCategories, setCustomCategories] = useState<CategoryDTO[]>([]);
   const [parsingJd, setParsingJd] = useState(false);
 
-  const isCustomSkill = skillId === CUSTOM_SKILL_ID;
+  const isCustomSkill = skillId === CUSTOM_SKILL_ID && directionMode === 'skill';
   const jdNeedsReparse = parsedCustomJdText.length > 0 && customJdText !== parsedCustomJdText;
-  const isCustomStartDisabled = isCustomSkill
-    && (customCategories.length === 0 || jdNeedsReparse || parsingJd);
+  
+  const selectedKB = knowledgeBases.find(kb => kb.id === knowledgeBaseId);
+  
+  const isCustomStartDisabled = (isCustomSkill
+    && (customCategories.length === 0 || jdNeedsReparse || parsingJd))
+    || (directionMode === 'kb' && (!knowledgeBaseId || selectedKB?.vectorStatus !== 'COMPLETED'));
 
   const loadSkills = async () => {
     setLoadingSkills(true);
@@ -78,6 +92,21 @@ export function useInterviewConfig(options?: {
       return [];
     } finally {
       setLoadingSkills(false);
+    }
+  };
+
+  const loadKnowledgeBases = async () => {
+    setLoadingKBs(true);
+    try {
+      // 获取所有知识库，不再仅限已完成的，方便用户看到正在处理中的知识库
+      const data = await knowledgeBaseApi.getAllKnowledgeBases('time');
+      setKnowledgeBases(data);
+      return data;
+    } catch (err) {
+      console.error('Failed to load knowledge bases:', err);
+      return [];
+    } finally {
+      setLoadingKBs(false);
     }
   };
 
@@ -115,6 +144,7 @@ export function useInterviewConfig(options?: {
         setShowMore(true);
       }
       loadSkills();
+      loadKnowledgeBases();
       loadResumes();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -123,10 +153,14 @@ export function useInterviewConfig(options?: {
   return {
     // State
     mode, setMode,
+    directionMode, setDirectionMode,
     skillId, setSkillId,
+    knowledgeBaseId, setKnowledgeBaseId,
     difficulty, setDifficulty,
     skills, setSkills,
+    knowledgeBases, setKnowledgeBases,
     loadingSkills,
+    loadingKBs,
     showMore, setShowMore,
     resumeId, setResumeId,
     resumes,
@@ -142,10 +176,12 @@ export function useInterviewConfig(options?: {
     isCustomSkill,
     // Actions
     loadSkills,
+    loadKnowledgeBases,
     loadResumes,
     handleParseJd,
     // Helpers
     getSkillIcon,
     get selectedSkill() { return skills.find(s => s.id === skillId); },
+    get selectedKB() { return knowledgeBases.find(kb => kb.id === knowledgeBaseId); },
   };
 }

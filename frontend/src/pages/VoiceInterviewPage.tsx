@@ -19,6 +19,7 @@ export default function VoiceInterviewPage() {
   const entryState = (location.state as {
     voiceConfig?: {
       skillId: string;
+      knowledgeBaseId?: number;
       difficulty?: string;
       techEnabled: boolean;
       projectEnabled: boolean;
@@ -368,6 +369,7 @@ export default function VoiceInterviewPage() {
 
   const handlePhaseConfig = useCallback(async (config: {
     skillId: string;
+    knowledgeBaseId?: number;
     difficulty?: string;
     techEnabled: boolean;
     projectEnabled: boolean;
@@ -382,6 +384,7 @@ export default function VoiceInterviewPage() {
     try {
       const session = await voiceInterviewApi.createSession({
         skillId: config.skillId,
+        knowledgeBaseId: config.knowledgeBaseId,
         difficulty: config.difficulty,
         introEnabled: false,
         techEnabled: config.techEnabled,
@@ -445,6 +448,7 @@ export default function VoiceInterviewPage() {
       autoStartRef.current = true;
       handlePhaseConfig({
         skillId: presetVoiceConfig.skillId,
+        knowledgeBaseId: presetVoiceConfig.knowledgeBaseId,
         difficulty: presetVoiceConfig.difficulty,
         techEnabled: presetVoiceConfig.techEnabled,
         projectEnabled: presetVoiceConfig.projectEnabled,
@@ -457,7 +461,7 @@ export default function VoiceInterviewPage() {
       autoStartRef.current = true;
       handleResumeSession(resumeSessionId);
     }
-  }, [handlePhaseConfig, handleResumeSession, presetVoiceConfig, resumeSessionId]);
+  }, [handlePhaseConfig, handleResumeSession, resumeSessionId]);
 
   // 麦克风音频持续发送给服务端做 ASR（手动提交模式下不需要 blockade，回声不会触发 LLM）
   const handleAudioData = (audioData: string) => {

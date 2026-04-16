@@ -89,6 +89,15 @@ public class KnowledgeBaseListService {
     }
 
     /**
+     * 根据ID获取知识库名称
+     */
+    public String getKnowledgeBaseName(Long id) {
+        return knowledgeBaseRepository.findById(id)
+            .map(KnowledgeBaseEntity::getName)
+            .orElse(null);
+    }
+
+    /**
      * 根据ID列表获取知识库名称列表
      */
     public List<String> getKnowledgeBaseNames(List<Long> ids) {

@@ -13,9 +13,9 @@ import java.util.List;
 public record CreateInterviewRequest(
     String resumeText,      // 简历文本内容（可选，无简历时为通用面试）
 
-    @Min(value = 3, message = "题目数量最少3题")
-    @Max(value = 20, message = "题目数量最多20题")
-    int questionCount,      // 面试题目数量 (3-20)
+    @Min(value = 5, message = "题目数量最少5题")
+    @Max(value = 15, message = "题目数量最多15题")
+    int questionCount,      // 面试题目数量 (5-15)
 
     Long resumeId,          // 简历ID（可选，无简历时不传）
 
@@ -25,6 +25,8 @@ public record CreateInterviewRequest(
 
     @NotBlank(message = "面试主题不能为空")
     String skillId,         // 面试主题 ID（如 java-backend, frontend, custom 等）
+
+    Long knowledgeBaseId,   // 关联的知识库ID（可选，KB面试模式下必填）
 
     String difficulty,      // 难度级别: junior / mid / senior
 

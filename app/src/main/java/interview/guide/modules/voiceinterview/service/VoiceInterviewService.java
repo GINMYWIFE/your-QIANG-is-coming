@@ -73,6 +73,7 @@ public class VoiceInterviewService {
                 .userId(DEFAULT_USER_ID)
                 .roleType(effectiveSkillId)
                 .skillId(effectiveSkillId)
+                .knowledgeBaseId(request.getKnowledgeBaseId())
                 .difficulty(request.getDifficulty() != null ? request.getDifficulty() : InterviewDefaults.DIFFICULTY)
                 .customJdText(request.getCustomJdText())
                 .resumeId(request.getResumeId())

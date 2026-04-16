@@ -7,6 +7,7 @@ import {voiceInterviewApi, SessionMeta} from '../api/voiceInterview';
 import {formatDate} from '../utils/date';
 import {getScoreProgressColor} from '../utils/score';
 import {skillApi, type SkillDTO} from '../api/skill';
+import {knowledgeBaseApi, type KnowledgeBaseItem} from '../api/knowledgebase';
 import {getTemplateName} from '../utils/voiceInterview';
 import DeleteConfirmDialog from '../components/DeleteConfirmDialog';
 import {
@@ -180,6 +181,8 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview,
   const pollingRef = useRef<number | null>(null);
   const skillsRef = useRef<SkillDTO[]>([]);
   const skillsLoadedRef = useRef(false);
+  const knowledgeBasesRef = useRef<KnowledgeBaseItem[]>([]);
+  const knowledgeBasesLoadedRef = useRef(false);
 
   const loadAll = useCallback(async (isPolling = false) => {
     if (!isPolling) setLoading(true);
@@ -190,9 +193,15 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview,
         skillsRef.current = await skillApi.listSkills().catch(() => [] as SkillDTO[]);
         skillsLoadedRef.current = true;
       }
+      if (!knowledgeBasesLoadedRef.current) {
+        knowledgeBasesRef.current = await knowledgeBaseApi.getAllKnowledgeBases('time')
+          .catch(() => [] as KnowledgeBaseItem[]);
+        knowledgeBasesLoadedRef.current = true;
+      }
       const loadedSkills = skillsRef.current;
+      const loadedKnowledgeBases = knowledgeBasesRef.current;
       const [textInterviews, voiceSessions] = await Promise.all([
-        loadTextInterviews(loadedSkills),
+        loadTextInterviews(loadedSkills, loadedKnowledgeBases),
         loadVoiceInterviews(),
       ]);
 
@@ -232,13 +241,15 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview,
   }, []);
 
   // Load text interviews from dedicated API
-  async function loadTextInterviews(skills: SkillDTO[]): Promise<UnifiedInterviewItem[]> {
+  async function loadTextInterviews(skills: SkillDTO[], knowledgeBases: KnowledgeBaseItem[]): Promise<UnifiedInterviewItem[]> {
     try {
       const sessions = await interviewApi.listSessions();
       return sessions.map((session: TextSessionMeta) => ({
         id: session.sessionId,
         type: 'text' as const,
-        title: getTemplateName(session.skillId, skills),
+        title: session.knowledgeBaseId
+          ? (knowledgeBases.find(kb => kb.id === session.knowledgeBaseId)?.name ?? `知识库-${session.knowledgeBaseId}`)
+          : getTemplateName(session.skillId, skills),
         sessionId: session.sessionId,
         status: session.status,
         evaluateStatus: session.evaluateStatus ?? undefined,

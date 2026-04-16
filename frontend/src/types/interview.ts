@@ -25,6 +25,7 @@ export interface CreateInterviewRequest {
   resumeText: string;
   questionCount: number;
   resumeId?: number;
+  knowledgeBaseId?: number;
   forceCreate?: boolean;
   llmProvider?: string;
   skillId: string;

@@ -13,6 +13,7 @@ export interface TextSessionMeta {
   skillId: string;
   difficulty: string;
   resumeId: number | null;
+  knowledgeBaseId?: number | null;
   totalQuestions: number;
   status: string;
   evaluateStatus: string | null;

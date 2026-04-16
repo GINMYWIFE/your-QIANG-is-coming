@@ -49,7 +49,8 @@ public class InterviewPersistenceService {
                                               List<InterviewQuestionDTO> questions,
                                               String llmProvider,
                                               String skillId,
-                                              String difficulty) {
+                                              String difficulty,
+                                              Long knowledgeBaseId) {
         try {
             InterviewSessionEntity session = new InterviewSessionEntity();
             session.setSessionId(sessionId);
@@ -60,6 +61,7 @@ public class InterviewPersistenceService {
             session.setLlmProvider(llmProvider != null ? llmProvider : InterviewDefaults.LLM_PROVIDER);
             session.setSkillId(skillId != null ? skillId : InterviewDefaults.SKILL_ID);
             session.setDifficulty(difficulty != null ? difficulty : InterviewDefaults.DIFFICULTY);
+            session.setKnowledgeBaseId(knowledgeBaseId);
 
             // 简历可选：有 resumeId 则关联简历
             if (resumeId != null) {
@@ -68,7 +70,8 @@ public class InterviewPersistenceService {
             }
 
             InterviewSessionEntity saved = sessionRepository.save(session);
-            log.info("面试会话已保存: sessionId={}, skillId={}, resumeId={}", sessionId, skillId, resumeId);
+            log.info("面试会话已保存: sessionId={}, skillId={}, resumeId={}, knowledgeBaseId={}",
+                sessionId, skillId, resumeId, knowledgeBaseId);
 
             return saved;
         } catch (JacksonException e) {

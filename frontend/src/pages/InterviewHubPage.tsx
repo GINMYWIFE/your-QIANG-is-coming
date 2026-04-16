@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  ChevronDown, ChevronUp, FileStack, FileText, Loader2, Mic,
+  AlertCircle, ChevronDown, ChevronUp, FileStack, FileText, Loader2, Mic,
   RefreshCw, Sparkles,
 } from 'lucide-react';
 import { type SkillDTO } from '../api/skill';
@@ -78,10 +78,14 @@ export default function InterviewHubPage() {
     }
   }, []);
 
-  // 初始加载：skills 和 resumes 并行，再用 skills 加载面试记录
+  // 初始加载：skills、resumes 和 knowledgeBases 并行，再用 skills 加载面试记录
   useEffect(() => {
     const init = async () => {
-      const [skills] = await Promise.all([config.loadSkills(), config.loadResumes()]);
+      const [skills] = await Promise.all([
+        config.loadSkills(),
+        config.loadResumes(),
+        config.loadKnowledgeBases(),
+      ]);
       await loadRecentInterviews(skills);
     };
     init();
@@ -90,7 +94,9 @@ export default function InterviewHubPage() {
 
   const handleStart = () => {
     const selectedSkill = config.selectedSkill;
-    const skillName = selectedSkill?.name || '自定义';
+    const skillName = config.directionMode === 'kb'
+      ? (config.selectedKB?.name || '知识库面试')
+      : (selectedSkill?.name || '自定义');
 
     if (config.isCustomStartDisabled) {
       return;
@@ -101,8 +107,9 @@ export default function InterviewHubPage() {
         state: {
           resumeId: config.resumeId,
           interviewConfig: {
-            skillId: config.skillId,
+            skillId: config.directionMode === 'kb' ? `kb-${config.knowledgeBaseId}` : config.skillId,
             skillName,
+            knowledgeBaseId: config.directionMode === 'kb' ? config.knowledgeBaseId : undefined,
             difficulty: config.difficulty,
             questionCount: config.questionCount,
             llmProvider: config.llmProvider,
@@ -112,11 +119,15 @@ export default function InterviewHubPage() {
         },
       });
     } else {
-      const params = new URLSearchParams({ skillId: config.skillId, difficulty: config.difficulty });
+      const params = new URLSearchParams({
+        skillId: config.directionMode === 'kb' ? `kb-${config.knowledgeBaseId}` : config.skillId,
+        difficulty: config.difficulty
+      });
       navigate(`/voice-interview?${params.toString()}`, {
         state: {
           voiceConfig: {
-            skillId: config.skillId,
+            skillId: config.directionMode === 'kb' ? `kb-${config.knowledgeBaseId}` : config.skillId,
+            knowledgeBaseId: config.directionMode === 'kb' ? config.knowledgeBaseId : undefined,
             difficulty: config.difficulty,
             techEnabled: true,
             projectEnabled: true,
@@ -196,72 +207,182 @@ export default function InterviewHubPage() {
             </div>
           </div>
 
-          {/* 面试方向 */}
+          {/* 面试方向类型切换 */}
           <div>
-            <label className="flex items-center gap-2 mb-3 text-sm font-semibold text-slate-700 dark:text-slate-200">
-              面试方向
-            </label>
-            {config.loadingSkills ? (
-              <div className="flex items-center gap-2 py-4 text-slate-400">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span className="text-sm">加载中...</span>
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                {config.skills.map(skill => {
-                  const selected = config.skillId === skill.id;
-                  const IconComponent = getSkillIcon(skill.id);
-                  const fallbackEmoji = skill.display?.icon || '📋';
-                  return (
-                    <button
-                      key={skill.id}
-                      onClick={() => config.setSkillId(skill.id)}
-                      className={`flex items-center gap-2.5 p-3 rounded-xl border-2 transition-all duration-200 text-left
-                        ${selected
-                          ? 'border-primary-500 bg-primary-50/80 dark:bg-primary-900/20'
-                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-600'
-                        }`}
-                    >
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm flex-shrink-0 ${
-                        selected ? skill.display?.iconBg || 'bg-primary-100 dark:bg-primary-900/50' : 'bg-slate-100 dark:bg-slate-700'
-                      }`}>
-                        {IconComponent
-                          ? <IconComponent className={`w-4 h-4 ${selected ? (skill.display?.iconColor || 'text-primary-600') : 'text-slate-500 dark:text-slate-400'}`} />
-                          : <span className={selected ? (skill.display?.iconColor || 'text-primary-600') : ''}>{fallbackEmoji}</span>
-                        }
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <span className={`text-xs font-medium block truncate ${selected ? 'text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-300'}`}>
-                          {skill.name}
-                        </span>
-                      </div>
-                    </button>
-                  );
-                })}
-                {/* 自定义按钮 */}
+            <div className="flex items-center justify-between mb-3">
+              <label className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                面试方向
+              </label>
+              <div className="flex bg-slate-100 dark:bg-slate-700 p-1 rounded-lg">
                 <button
-                  onClick={() => config.setSkillId(CUSTOM_SKILL_ID)}
-                  className={`flex items-center gap-2.5 p-3 rounded-xl border-2 border-dashed transition-all duration-200 text-left
-                    ${config.isCustomSkill
-                      ? 'border-primary-500 bg-primary-50/80 dark:bg-primary-900/20'
-                      : 'border-slate-200 dark:border-slate-700 hover:border-primary-300 dark:hover:border-primary-600'
-                    }`}
+                  onClick={() => config.setDirectionMode('skill')}
+                  className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
+                    config.directionMode === 'skill'
+                      ? 'bg-white dark:bg-slate-600 text-primary-600 dark:text-primary-400 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                  }`}
                 >
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                    config.isCustomSkill ? 'bg-primary-100 dark:bg-primary-900/50' : 'bg-slate-100 dark:bg-slate-700'
-                  }`}>
-                    {(() => {
-                      const CustomIcon = getSkillIcon(CUSTOM_SKILL_ID);
-                      return CustomIcon
-                        ? <CustomIcon className={`w-4 h-4 ${config.isCustomSkill ? 'text-primary-600 dark:text-primary-400' : 'text-slate-500 dark:text-slate-400'}`} />
-                        : <span className="text-sm">✨</span>;
-                    })()}
-                  </div>
-                  <span className={`text-xs font-medium ${config.isCustomSkill ? 'text-primary-700 dark:text-primary-300' : 'text-slate-500 dark:text-slate-400'}`}>
-                    自定义 JD
-                  </span>
+                  预设/自定义
+                </button>
+                <button
+                  onClick={() => config.setDirectionMode('kb')}
+                  className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
+                    config.directionMode === 'kb'
+                      ? 'bg-white dark:bg-slate-600 text-primary-600 dark:text-primary-400 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                  }`}
+                >
+                  知识库模式
                 </button>
               </div>
+            </div>
+
+            {config.directionMode === 'skill' ? (
+              config.loadingSkills ? (
+                <div className="flex items-center gap-2 py-4 text-slate-400">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span className="text-sm">加载中...</span>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                  {config.skills.map(skill => {
+                    const selected = config.skillId === skill.id;
+                    const IconComponent = getSkillIcon(skill.id);
+                    const fallbackEmoji = skill.display?.icon || '📋';
+                    return (
+                      <button
+                        key={skill.id}
+                        onClick={() => config.setSkillId(skill.id)}
+                        className={`flex items-center gap-2.5 p-3 rounded-xl border-2 transition-all duration-200 text-left
+                          ${selected
+                            ? 'border-primary-500 bg-primary-50/80 dark:bg-primary-900/20'
+                            : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-600'
+                          }`}
+                      >
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm flex-shrink-0 ${
+                          selected ? skill.display?.iconBg || 'bg-primary-100 dark:bg-primary-900/50' : 'bg-slate-100 dark:bg-slate-700'
+                        }`}>
+                          {IconComponent
+                            ? <IconComponent className={`w-4 h-4 ${selected ? (skill.display?.iconColor || 'text-primary-600') : 'text-slate-500 dark:text-slate-400'}`} />
+                            : <span className={selected ? (skill.display?.iconColor || 'text-primary-600') : ''}>{fallbackEmoji}</span>
+                          }
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <span className={`text-xs font-medium block truncate ${selected ? 'text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-300'}`}>
+                            {skill.name}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                  {/* 自定义按钮 */}
+                  <button
+                    onClick={() => config.setSkillId(CUSTOM_SKILL_ID)}
+                    className={`flex items-center gap-2.5 p-3 rounded-xl border-2 border-dashed transition-all duration-200 text-left
+                      ${config.isCustomSkill
+                        ? 'border-primary-500 bg-primary-50/80 dark:bg-primary-900/20'
+                        : 'border-slate-200 dark:border-slate-700 hover:border-primary-300 dark:hover:border-primary-600'
+                      }`}
+                  >
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                      config.isCustomSkill ? 'bg-primary-100 dark:bg-primary-900/50' : 'bg-slate-100 dark:bg-slate-700'
+                    }`}>
+                      {(() => {
+                        const CustomIcon = getSkillIcon(CUSTOM_SKILL_ID);
+                        return CustomIcon
+                          ? <CustomIcon className={`w-4 h-4 ${config.isCustomSkill ? 'text-primary-600 dark:text-primary-400' : 'text-slate-500 dark:text-slate-400'}`} />
+                          : <span className="text-sm">✨</span>;
+                      })()}
+                    </div>
+                    <span className={`text-xs font-medium ${config.isCustomSkill ? 'text-primary-700 dark:text-primary-300' : 'text-slate-500 dark:text-slate-400'}`}>
+                      自定义 JD
+                    </span>
+                  </button>
+                </div>
+              )
+            ) : (
+              config.loadingKBs ? (
+                <div className="flex items-center gap-2 py-4 text-slate-400">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span className="text-sm">加载中...</span>
+                </div>
+              ) : config.knowledgeBases.length > 0 ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                  {config.knowledgeBases.map(kb => {
+                    const selected = config.knowledgeBaseId === kb.id;
+                    const isReady = kb.vectorStatus === 'COMPLETED';
+                    const isProcessing = kb.vectorStatus === 'PROCESSING' || kb.vectorStatus === 'PENDING';
+                    
+                    return (
+                      <button
+                        key={kb.id}
+                        onClick={() => config.setKnowledgeBaseId(kb.id)}
+                        disabled={!isReady}
+                        className={`group relative flex items-center gap-2.5 p-3 rounded-xl border-2 transition-all duration-200 text-left
+                          ${selected
+                            ? 'border-primary-500 bg-primary-50/80 dark:bg-primary-900/20'
+                            : isReady
+                              ? 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-600'
+                              : 'border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 opacity-60 cursor-not-allowed'
+                          }`}
+                      >
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm flex-shrink-0 ${
+                          selected 
+                            ? 'bg-primary-100 dark:bg-primary-900/50' 
+                            : isReady 
+                              ? 'bg-slate-100 dark:bg-slate-700' 
+                              : 'bg-slate-200 dark:bg-slate-800'
+                        }`}>
+                          {isProcessing ? (
+                            <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
+                          ) : (
+                            <FileStack className={`w-4 h-4 ${
+                              selected 
+                                ? 'text-primary-600' 
+                                : isReady 
+                                  ? 'text-slate-500 dark:text-slate-400' 
+                                  : 'text-slate-400 dark:text-slate-500'
+                            }`} />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <span className={`text-xs font-medium block truncate ${
+                            selected 
+                              ? 'text-primary-700 dark:text-primary-300' 
+                              : isReady 
+                                ? 'text-slate-700 dark:text-slate-300' 
+                                : 'text-slate-500 dark:text-slate-500'
+                          }`}>
+                            {kb.name}
+                          </span>
+                          {!isReady && (
+                            <span className="text-[10px] text-slate-400 block truncate">
+                              {kb.vectorStatus === 'FAILED' ? '解析失败' : '正在解析...'}
+                            </span>
+                          )}
+                        </div>
+                        
+                        {/* 状态提示 */}
+                        {!isReady && !isProcessing && kb.vectorStatus === 'FAILED' && (
+                          <div className="absolute top-1 right-1">
+                            <AlertCircle className="w-3 h-3 text-red-500" />
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="py-8 text-center bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-dashed border-slate-200 dark:border-slate-700">
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mb-2">暂无已完成解析的知识库</p>
+                  <Link
+                    to="/knowledgebase/upload"
+                    className="text-xs text-primary-500 hover:text-primary-600 font-medium"
+                  >
+                    去上传并解析知识库 &rarr;
+                  </Link>
+                </div>
+              )
             )}
           </div>
 

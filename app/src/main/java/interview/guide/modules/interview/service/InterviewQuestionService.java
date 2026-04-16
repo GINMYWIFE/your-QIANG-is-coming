@@ -1,6 +1,5 @@
 package interview.guide.modules.interview.service;
 
-import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.ai.StructuredOutputInvoker;
 import interview.guide.common.constant.CommonConstants.InterviewDefaults;
 import interview.guide.common.exception.BusinessException;
@@ -23,14 +22,18 @@ import jakarta.annotation.PreDestroy;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 /**
@@ -73,10 +76,12 @@ public class InterviewQuestionService {
     private final PromptTemplate skillUserPromptTemplate;
     private final PromptTemplate resumeSystemPromptTemplate;
     private final PromptTemplate resumeUserPromptTemplate;
+    private final PromptTemplate kbSystemPromptTemplate;
+    private final PromptTemplate kbUserPromptTemplate;
     private final BeanOutputConverter<QuestionListDTO> outputConverter;
     private final StructuredOutputInvoker structuredOutputInvoker;
     private final InterviewSkillService skillService;
-    private final LlmProviderRegistry llmProviderRegistry;
+    private final interview.guide.modules.knowledgebase.service.KnowledgeBaseQueryService kbQueryService;
     private final ExecutorService questionExecutor;
     private final int followUpCount;
 
@@ -88,17 +93,19 @@ public class InterviewQuestionService {
     public InterviewQuestionService(
             StructuredOutputInvoker structuredOutputInvoker,
             InterviewSkillService skillService,
+            interview.guide.modules.knowledgebase.service.KnowledgeBaseQueryService kbQueryService,
             InterviewQuestionProperties properties,
-            ResourceLoader resourceLoader,
-            LlmProviderRegistry llmProviderRegistry) throws IOException {
+            ResourceLoader resourceLoader) throws IOException {
         this.structuredOutputInvoker = structuredOutputInvoker;
         this.skillService = skillService;
-        this.llmProviderRegistry = llmProviderRegistry;
+        this.kbQueryService = kbQueryService;
         this.questionExecutor = Executors.newVirtualThreadPerTaskExecutor();
         this.skillSystemPromptTemplate = loadTemplate(resourceLoader, properties.getQuestionSystemPromptPath());
         this.skillUserPromptTemplate = loadTemplate(resourceLoader, properties.getQuestionUserPromptPath());
         this.resumeSystemPromptTemplate = loadTemplate(resourceLoader, properties.getResumeQuestionSystemPromptPath());
         this.resumeUserPromptTemplate = loadTemplate(resourceLoader, properties.getResumeQuestionUserPromptPath());
+        this.kbSystemPromptTemplate = loadTemplate(resourceLoader, properties.getKbQuestionSystemPromptPath());
+        this.kbUserPromptTemplate = loadTemplate(resourceLoader, properties.getKbQuestionUserPromptPath());
         this.outputConverter = new BeanOutputConverter<>(QuestionListDTO.class);
         this.followUpCount = Math.max(0, Math.min(properties.getFollowUpCount(), MAX_FOLLOW_UP_COUNT));
     }
@@ -138,7 +145,7 @@ public class InterviewQuestionService {
             skillId, questionCount, resumeCount, directionCount);
 
         CompletableFuture<List<InterviewQuestionDTO>> resumeFuture = CompletableFuture.supplyAsync(
-            () -> generateResumeQuestions(resumeText, resumeCount, skill, difficultyDesc, historicalSection),
+            () -> generateResumeQuestions(chatClient, resumeText, resumeCount, skill, difficultyDesc, historicalSection),
             questionExecutor);
 
         CompletableFuture<List<InterviewQuestionDTO>> directionFuture = CompletableFuture.supplyAsync(
@@ -177,10 +184,9 @@ public class InterviewQuestionService {
     }
 
     private List<InterviewQuestionDTO> generateResumeQuestions(
-            String resumeText, int questionCount,
+            ChatClient chatClient, String resumeText, int questionCount,
             SkillDTO skill, String difficultyDesc, String historicalSection) {
         try {
-            ChatClient plainClient = llmProviderRegistry.getPlainChatClient(null);
             Map<String, Object> variables = new HashMap<>();
             variables.put("questionCount", questionCount);
             variables.put("followUpCount", followUpCount);
@@ -193,10 +199,16 @@ public class InterviewQuestionService {
             String systemPrompt = resumeSystemPromptTemplate.render() + "\n\n" + outputConverter.getFormat();
             String userPrompt = resumeUserPromptTemplate.render(variables);
 
-            QuestionListDTO dto = structuredOutputInvoker.invoke(
-                plainClient, systemPrompt, userPrompt, outputConverter,
-                ErrorCode.INTERVIEW_QUESTION_GENERATION_FAILED,
-                "简历题生成失败：", "简历题", log);
+            QuestionListDTO dto = callWithTimeout(
+                () -> structuredOutputInvoker.invoke(
+                    chatClient, systemPrompt, userPrompt, outputConverter,
+                    ErrorCode.INTERVIEW_QUESTION_GENERATION_FAILED,
+                    "简历题生成失败：", "简历题", log
+                ),
+                Duration.ofSeconds(120),
+                ErrorCode.AI_SERVICE_TIMEOUT,
+                "生成面试题超时"
+            );
 
             List<InterviewQuestionDTO> questions = convertToQuestions(dto);
             questions = capToMainCount(questions, questionCount);
@@ -207,6 +219,101 @@ public class InterviewQuestionService {
             throw e;
         } catch (Exception e) {
             log.error("简历题生成异常: {}", e.getMessage(), e);
+            throw e;
+        }
+    }
+
+    /**
+     * 基于知识库生成面试问题（RAG）
+     */
+    public List<InterviewQuestionDTO> generateQuestionsByKnowledgeBase(
+            ChatClient chatClient,
+            Long knowledgeBaseId,
+            String skillName,
+            String difficulty,
+            String resumeText,
+            int questionCount,
+            List<HistoricalQuestion> historicalQuestions) {
+
+        log.info("基于知识库生成面试题: kbId={}, skillName={}, count={}", knowledgeBaseId, skillName, questionCount);
+
+        String context = callWithTimeout(
+            () -> kbQueryService.retrieveContextForInterview(
+                knowledgeBaseId,
+                (skillName != null ? skillName : "") + " 关键知识点 架构 原理 实践",
+                12
+            ),
+            Duration.ofSeconds(10),
+            ErrorCode.KNOWLEDGE_BASE_QUERY_FAILED,
+            "知识库检索超时"
+        );
+        if (context == null || context.isBlank()) {
+            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_QUERY_FAILED, "知识库未检索到可用于出题的内容");
+        }
+
+        String difficultyDesc = resolveDifficulty(difficulty);
+        String historicalSection = buildHistoricalSection(historicalQuestions);
+
+        try {
+            Map<String, Object> variables = new HashMap<>();
+            variables.put("questionCount", questionCount);
+            variables.put("followUpCount", followUpCount);
+            variables.put("difficultyDescription", difficultyDesc);
+            variables.put("skillName", skillName);
+            variables.put("context", context);
+            variables.put("resumeSection", (resumeText != null && !resumeText.isBlank()) ? "## 候选人简历\n" + resumeText : "暂无简历");
+            variables.put("historicalSection", historicalSection);
+
+            String systemPrompt = kbSystemPromptTemplate.render() + "\n\n" + outputConverter.getFormat();
+            String userPrompt = kbUserPromptTemplate.render(variables);
+
+            QuestionListDTO dto = callWithTimeout(
+                () -> structuredOutputInvoker.invoke(
+                    chatClient, systemPrompt, userPrompt, outputConverter,
+                    ErrorCode.INTERVIEW_QUESTION_GENERATION_FAILED,
+                    "知识库题目生成失败：", "知识库题", log
+                ),
+                Duration.ofSeconds(120),
+                ErrorCode.AI_SERVICE_TIMEOUT,
+                "生成面试题超时"
+            );
+
+            List<InterviewQuestionDTO> questions = convertToQuestions(dto);
+            questions = capToMainCount(questions, questionCount);
+
+            log.info("知识库题目生成完成: 请求={}, 实际主问题={}",
+                questionCount, questions.stream().filter(q -> !q.isFollowUp()).count());
+
+            return questions;
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("知识库题目生成失败: {}", e.getMessage(), e);
+            // 如果知识库出题失败，可以考虑回退到普通出题或者抛出异常
+            throw new BusinessException(ErrorCode.INTERVIEW_QUESTION_GENERATION_FAILED, "基于知识库生成题目失败");
+        }
+    }
+
+    private <T> T callWithTimeout(Callable<T> callable,
+                                  Duration timeout,
+                                  ErrorCode timeoutCode,
+                                  String timeoutMessage) {
+        try {
+            return CompletableFuture.supplyAsync(() -> {
+                try {
+                    return callable.call();
+                } catch (Exception e) {
+                    throw new CompletionException(e);
+                }
+            }, questionExecutor).orTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS).join();
+        } catch (CompletionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof TimeoutException) {
+                throw new BusinessException(timeoutCode, timeoutMessage);
+            }
+            if (cause instanceof BusinessException be) {
+                throw be;
+            }
             throw e;
         }
     }
@@ -231,16 +338,23 @@ public class InterviewQuestionService {
             variables.put("allocationTable", allocationTable);
             variables.put("historicalSection", historicalSection);
             variables.put("referenceSection", skillService.buildReferenceSection(skill, allocation));
+            variables.put("personaSection", buildPersonaSection(skill.persona()));
             variables.put("jdSection", buildJdSection(skill.sourceJd()));
 
             String systemPrompt = skillSystemPromptTemplate.render()
                 + GENERIC_MODE_SYSTEM_APPEND + outputConverter.getFormat();
             String userPrompt = skillUserPromptTemplate.render(variables);
 
-            QuestionListDTO dto = structuredOutputInvoker.invoke(
-                chatClient, systemPrompt, userPrompt, outputConverter,
-                ErrorCode.INTERVIEW_QUESTION_GENERATION_FAILED,
-                "方向题生成失败：", "方向题", log);
+            QuestionListDTO dto = callWithTimeout(
+                () -> structuredOutputInvoker.invoke(
+                    chatClient, systemPrompt, userPrompt, outputConverter,
+                    ErrorCode.INTERVIEW_QUESTION_GENERATION_FAILED,
+                    "方向题生成失败：", "方向题", log
+                ),
+                Duration.ofSeconds(120),
+                ErrorCode.AI_SERVICE_TIMEOUT,
+                "生成面试题超时"
+            );
 
             List<InterviewQuestionDTO> questions = convertToQuestions(dto);
             if (questions.stream().filter(q -> !q.isFollowUp()).count() == 0) {
@@ -411,6 +525,13 @@ public class InterviewQuestionService {
             sb.append('\n');
         }
         return sb.toString();
+    }
+
+    private String buildPersonaSection(String persona) {
+        if (persona == null || persona.isBlank()) {
+            return "使用专业、直接、可执行的技术面试官风格。";
+        }
+        return persona;
     }
 
     private String buildJdSection(String sourceJd) {

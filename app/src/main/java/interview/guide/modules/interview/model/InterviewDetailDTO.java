@@ -21,7 +21,8 @@ public record InterviewDetailDTO(
     List<String> strengths,
     List<String> improvements,
     List<Object> referenceAnswers,
-    List<AnswerDetailDTO> answers
+    List<AnswerDetailDTO> answers,
+    Long knowledgeBaseId
 ) {
     /**
      * 答案详情DTO

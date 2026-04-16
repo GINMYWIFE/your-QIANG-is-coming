@@ -15,7 +15,8 @@ import java.util.List;
 @Table(name = "interview_sessions", indexes = {
     @Index(name = "idx_interview_session_resume_created", columnList = "resume_id,created_at"),
     @Index(name = "idx_interview_session_resume_status_created", columnList = "resume_id,status,created_at"),
-    @Index(name = "idx_interview_session_skill_created", columnList = "skillId,createdAt")
+    @Index(name = "idx_interview_session_skill_created", columnList = "skillId,createdAt"),
+    @Index(name = "idx_interview_session_kb_created", columnList = "knowledgeBaseId,createdAt")
 })
 public class InterviewSessionEntity {
     
@@ -30,6 +31,9 @@ public class InterviewSessionEntity {
     // 面试主题
     @Column(length = 64)
     private String skillId = "java-backend";
+
+    // 关联的知识库ID（可选）
+    private Long knowledgeBaseId;
 
     // 难度级别 (junior / mid / senior)
     @Column(length = 16)
@@ -277,6 +281,14 @@ public class InterviewSessionEntity {
 
     public void setDifficulty(String difficulty) {
         this.difficulty = difficulty;
+    }
+
+    public Long getKnowledgeBaseId() {
+        return knowledgeBaseId;
+    }
+
+    public void setKnowledgeBaseId(Long knowledgeBaseId) {
+        this.knowledgeBaseId = knowledgeBaseId;
     }
 
     public void addAnswer(InterviewAnswerEntity answer) {

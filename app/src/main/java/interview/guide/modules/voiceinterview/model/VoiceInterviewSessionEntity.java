@@ -42,6 +42,9 @@ public class VoiceInterviewSessionEntity {
     @Column(name = "resume_id")
     private Long resumeId;
 
+    @Column(name = "knowledge_base_id")
+    private Long knowledgeBaseId;
+
     @Column(name = "intro_enabled")
     @Builder.Default
     private Boolean introEnabled = true;

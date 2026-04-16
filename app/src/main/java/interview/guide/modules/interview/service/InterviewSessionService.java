@@ -46,6 +46,7 @@ public class InterviewSessionService {
     private final ObjectMapper objectMapper;
     private final EvaluateStreamProducer evaluateStreamProducer;
     private final LlmProviderRegistry llmProviderRegistry;
+    private final interview.guide.modules.knowledgebase.service.KnowledgeBaseListService kbListService;
 
     /**
      * 创建新的面试会话
@@ -57,18 +58,37 @@ public class InterviewSessionService {
         if (request.resumeId() != null && !Boolean.TRUE.equals(request.forceCreate())) {
             Optional<InterviewSessionDTO> unfinishedOpt = findUnfinishedSession(request.resumeId());
             if (unfinishedOpt.isPresent()) {
-                log.info("检测到未完成的面试会话，返回现有会话: resumeId={}, sessionId={}",
-                    request.resumeId(), unfinishedOpt.get().sessionId());
-                return unfinishedOpt.get();
+                // 如果是同一种面试模式（同一个 KB 或同一个非 KB 模式），才返回现有会话
+                InterviewSessionDTO existing = unfinishedOpt.get();
+                boolean sameKb = (request.knowledgeBaseId() == null && existing.knowledgeBaseId() == null)
+                    || (request.knowledgeBaseId() != null && request.knowledgeBaseId().equals(existing.knowledgeBaseId()));
+                
+                if (sameKb) {
+                    log.info("检测到同模式未完成的面试会话，返回现有会话: resumeId={}, sessionId={}",
+                        request.resumeId(), existing.sessionId());
+                    return existing;
+                }
             }
         }
 
         String sessionId = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
         String skillId = request.skillId() != null ? request.skillId() : InterviewDefaults.SKILL_ID;
+        Long kbId = request.knowledgeBaseId();
+        String kbDisplayName = null;
+        if (kbId != null) {
+            if (request.skillId() == null || InterviewDefaults.SKILL_ID.equals(request.skillId())) {
+                skillId = "kb-" + kbId;
+            }
+            kbDisplayName = kbListService.getKnowledgeBaseName(kbId);
+            if (kbDisplayName == null || kbDisplayName.isBlank()) {
+                kbDisplayName = "知识库-" + kbId;
+            }
+        }
+
         String difficulty = request.difficulty() != null ? request.difficulty() : InterviewDefaults.DIFFICULTY;
 
-        log.info("创建新面试会话: {}, skill: {}, difficulty: {}, questionCount: {}, resumeId: {}",
-            sessionId, skillId, difficulty, request.questionCount(), request.resumeId());
+        log.info("创建新面试会话: {}, skill: {}, kbId: {}, difficulty: {}, questionCount: {}, resumeId: {}",
+            sessionId, skillId, kbId, difficulty, request.questionCount(), request.resumeId());
 
         // 获取历史问题（通用模式按 skillId 查询，有简历时按 resumeId + skillId 精确匹配）
         List<HistoricalQuestion> historicalQuestions =
@@ -77,35 +97,45 @@ public class InterviewSessionService {
         // 获取 LLM 客户端
         ChatClient chatClient = llmProviderRegistry.getChatClientOrDefault(request.llmProvider());
 
-        // 基于 Skill 生成面试问题
-        List<InterviewQuestionDTO> questions = questionService.generateQuestionsBySkill(
-            chatClient,
-            skillId,
-            difficulty,
-            request.resumeText(),
-            request.questionCount(),
-            historicalQuestions,
-            request.customCategories(),
-            request.jdText()
-        );
-
+        // 基于 Skill 或 KnowledgeBase 生成面试问题
+        List<InterviewQuestionDTO> questions;
+        if (kbId != null) {
+            questions = questionService.generateQuestionsByKnowledgeBase(
+                chatClient,
+                kbId,
+                kbDisplayName != null ? kbDisplayName : skillId,
+                difficulty,
+                request.resumeText(),
+                request.questionCount(),
+                historicalQuestions
+            );
+        } else {
+            questions = questionService.generateQuestionsBySkill(
+                chatClient,
+                skillId,
+                difficulty,
+                request.resumeText(),
+                request.questionCount(),
+                historicalQuestions,
+                request.customCategories(),
+                request.jdText()
+            );
+        }
+        // 保存到 Redis 缓存
         // 保存到 Redis 缓存
         sessionCache.saveSession(
             sessionId,
             request.resumeText() != null ? request.resumeText() : "",
             request.resumeId(),
+            kbId,
             questions,
             0,
             SessionStatus.CREATED
         );
 
         // 保存到数据库
-        try {
-            persistenceService.saveSession(sessionId, request.resumeId(),
-                questions.size(), questions, request.llmProvider(), skillId, difficulty);
-        } catch (Exception e) {
-            log.warn("保存面试会话到数据库失败: {}", e.getMessage());
-        }
+        persistenceService.saveSession(sessionId, request.resumeId(),
+            questions.size(), questions, request.llmProvider(), skillId, difficulty, kbId);
 
         return new InterviewSessionDTO(
             sessionId,
@@ -113,7 +143,8 @@ public class InterviewSessionService {
             questions.size(),
             0,
             questions,
-            SessionStatus.CREATED
+            SessionStatus.CREATED,
+            kbId
         );
     }
 
@@ -218,6 +249,7 @@ public class InterviewSessionService {
                 entity.getSessionId(),
                 entity.getResume() != null ? entity.getResume().getResumeText() : "",
                 entity.getResume() != null ? entity.getResume().getId() : null,
+                entity.getKnowledgeBaseId(),
                 questions,
                 entity.getCurrentQuestionIndex(),
                 status
@@ -500,7 +532,8 @@ public class InterviewSessionService {
             questions.size(),
             session.getCurrentIndex(),
             questions,
-            session.getStatus()
+            session.getStatus(),
+            session.getKnowledgeBaseId()
         );
     }
 }

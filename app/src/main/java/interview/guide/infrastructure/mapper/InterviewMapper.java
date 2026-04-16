@@ -73,6 +73,7 @@ public interface InterviewMapper {
     @Mapping(target = "improvements", source = "improvements")
     @Mapping(target = "referenceAnswers", source = "referenceAnswers")
     @Mapping(target = "answers", source = "answers")
+    @Mapping(target = "knowledgeBaseId", source = "session.knowledgeBaseId")
     InterviewDetailDTO toDetailDTO(
         InterviewSessionEntity session,
         List<Object> questions,
