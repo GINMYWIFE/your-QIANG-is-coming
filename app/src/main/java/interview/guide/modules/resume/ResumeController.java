@@ -2,6 +2,7 @@ package interview.guide.modules.resume;
 
 import interview.guide.common.annotation.RateLimit;
 import interview.guide.common.result.Result;
+import interview.guide.modules.resume.model.AbilityFeedbackResponse;
 import interview.guide.modules.resume.model.ResumeDetailDTO;
 import interview.guide.modules.resume.model.ResumeListItemDTO;
 import interview.guide.modules.resume.service.ResumeDeleteService;
@@ -13,12 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.net.URLEncoder;
@@ -74,6 +70,11 @@ public class ResumeController {
     public Result<ResumeDetailDTO> getResumeDetail(@PathVariable Long id) {
         ResumeDetailDTO detail = historyService.getResumeDetail(id);
         return Result.success(detail);
+    }
+
+    @GetMapping("/api/resumes/{id}/ability-feedback")
+    public Result<AbilityFeedbackResponse> getAbilityFeedback(@PathVariable Long id) {
+        return Result.success(historyService.getAbilityFeedback(id));
     }
 
     /**

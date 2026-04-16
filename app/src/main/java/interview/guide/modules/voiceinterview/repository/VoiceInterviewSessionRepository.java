@@ -42,4 +42,6 @@ public interface VoiceInterviewSessionRepository extends JpaRepository<VoiceInte
         String userId,
         VoiceInterviewSessionStatus status
     );
+
+    List<VoiceInterviewSessionEntity> findByResumeIdOrderByStartTimeDesc(Long resumeId);
 }

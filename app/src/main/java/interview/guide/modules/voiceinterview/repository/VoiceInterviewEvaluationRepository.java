@@ -4,6 +4,7 @@ import interview.guide.modules.voiceinterview.model.VoiceInterviewEvaluationEnti
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -16,4 +17,6 @@ public interface VoiceInterviewEvaluationRepository extends JpaRepository<VoiceI
      * 根据会话ID查找评估结果（一对一关系）
      */
     Optional<VoiceInterviewEvaluationEntity> findBySessionId(Long sessionId);
+
+    List<VoiceInterviewEvaluationEntity> findBySessionIdIn(List<Long> sessionIds);
 }

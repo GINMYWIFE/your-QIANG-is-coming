@@ -87,6 +87,14 @@ export interface InterviewDetail extends InterviewItem {
   answers: AnswerItem[];
 }
 
+export interface AbilityFeedbackResponse {
+  resumeId: number;
+  growth: Array<{ time: string; source: string; score: number }>;
+  focusAreas: Array<{ area: string; mentionCount: number }>;
+  suggestions: Array<{ area: string; title: string; description: string; priority: string }>;
+  resources: Array<{ area: string; title: string; url: string; source: string }>;
+}
+
 export const historyApi = {
   /**
    * 获取所有简历列表
@@ -100,6 +108,10 @@ export const historyApi = {
    */
   async getResumeDetail(id: number): Promise<ResumeDetail> {
     return request.get<ResumeDetail>(`/api/resumes/${id}/detail`);
+  },
+
+  async getAbilityFeedback(resumeId: number): Promise<AbilityFeedbackResponse> {
+    return request.get<AbilityFeedbackResponse>(`/api/resumes/${resumeId}/ability-feedback`);
   },
 
   /**

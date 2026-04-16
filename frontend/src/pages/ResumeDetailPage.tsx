@@ -1,12 +1,21 @@
 import {useCallback, useEffect, useState} from 'react';
 import {useLocation} from 'react-router-dom';
 import {AnimatePresence, motion} from 'framer-motion';
-import {historyApi, InterviewDetail, ResumeDetail} from '../api/history';
+import {historyApi, InterviewDetail, ResumeDetail, AbilityFeedbackResponse} from '../api/history';
 import AnalysisPanel from '../components/AnalysisPanel';
 import InterviewPanel from '../components/InterviewPanel';
 import InterviewDetailPanel from '../components/InterviewDetailPanel';
 import {formatDateOnly} from '../utils/date';
-import {CheckSquare, ChevronLeft, Clock, Download, MessageSquare, Mic} from 'lucide-react';
+import {CheckSquare, ChevronLeft, Clock, Download, MessageSquare, Mic, TrendingUp, ExternalLink} from 'lucide-react';
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 
 interface ResumeDetailPageProps {
   resumeId: number;
@@ -14,7 +23,7 @@ interface ResumeDetailPageProps {
   onStartInterview: (resumeId: number) => void;
 }
 
-type TabType = 'analysis' | 'interview';
+type TabType = 'analysis' | 'interview' | 'ability';
 type DetailViewType = 'list' | 'interviewDetail';
 
 export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }: ResumeDetailPageProps) {
@@ -28,6 +37,8 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
   const [selectedInterview, setSelectedInterview] = useState<InterviewDetail | null>(null);
   const [loadingInterview, setLoadingInterview] = useState(false);
   const [reanalyzing, setReanalyzing] = useState(false);
+  const [ability, setAbility] = useState<AbilityFeedbackResponse | null>(null);
+  const [loadingAbility, setLoadingAbility] = useState(false);
 
   // 静默加载数据（用于轮询）
   const loadResumeDetailSilent = useCallback(async () => {
@@ -176,12 +187,23 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
   };
 
   const handleTabChange = (tab: TabType) => {
-    const newPage = tab === 'analysis' ? 0 : 1;
+    const newPage = tab === 'analysis' ? 0 : tab === 'interview' ? 1 : 2;
     setPage([newPage, newPage > page ? 1 : -1]);
     setActiveTab(tab);
     setDetailView('list');
     setSelectedInterview(null);
   };
+
+  useEffect(() => {
+    if (activeTab !== 'ability') {
+      return;
+    }
+    setLoadingAbility(true);
+    historyApi.getAbilityFeedback(resumeId)
+      .then(setAbility)
+      .catch(() => setAbility(null))
+      .finally(() => setLoadingAbility(false));
+  }, [activeTab, resumeId]);
 
   const slideVariants = {
     enter: (direction: number) => ({
@@ -223,6 +245,7 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
   const tabs = [
     { id: 'analysis' as const, label: '简历分析', icon: CheckSquare },
     { id: 'interview' as const, label: '面试记录', icon: MessageSquare, count: resume.interviews?.length || 0 },
+    { id: 'ability' as const, label: '能力提升', icon: TrendingUp },
   ];
 
   return (
@@ -340,7 +363,7 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
                   onReanalyze={handleReanalyze}
                   reanalyzing={reanalyzing}
                 />
-              ) : (
+              ) : activeTab === 'interview' ? (
                   <InterviewPanel
                       interviews={resume.interviews || []}
                   onStartInterview={() => onStartInterview(resumeId)}
@@ -350,11 +373,169 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
                   exporting={exporting}
                   loadingInterview={loadingInterview}
                 />
+              ) : (
+                <AbilityPanel ability={ability} loading={loadingAbility} />
               )}
             </motion.div>
           </AnimatePresence>
         )}
       </div>
     </motion.div>
+  );
+}
+
+function AbilityPanel({ ability, loading }: { ability: AbilityFeedbackResponse | null; loading: boolean }) {
+  if (loading) {
+    return (
+      <div className="bg-white dark:bg-slate-800 rounded-2xl p-12 text-center">
+        <div className="w-12 h-12 border-4 border-slate-200 dark:border-slate-600 border-t-primary-500 rounded-full mx-auto mb-4 animate-spin" />
+        <p className="text-slate-500 dark:text-slate-400">正在生成能力成长与反馈...</p>
+      </div>
+    );
+  }
+
+  if (!ability) {
+    return (
+      <div className="bg-white dark:bg-slate-800 rounded-2xl p-12 text-center">
+        <p className="text-slate-500 dark:text-slate-400">暂无能力提升数据</p>
+      </div>
+    );
+  }
+
+  const chartData = ability.growth.map(p => ({
+    name: new Date(p.time).toLocaleDateString(),
+    score: p.score,
+    source: p.source,
+  }));
+
+  return (
+    <div className="space-y-6">
+      <motion.div
+        className="bg-white dark:bg-slate-800 rounded-2xl p-6"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+      >
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-2">
+            <TrendingUp className="w-5 h-5 text-primary-500" />
+            <span className="font-semibold text-slate-800 dark:text-white">能力成长曲线</span>
+          </div>
+          <span className="text-sm text-slate-500 dark:text-slate-400">共 {chartData.length} 个节点</span>
+        </div>
+
+        {chartData.length > 0 ? (
+          <div className="h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" className="dark:stroke-slate-700" />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} />
+                <YAxis domain={[0, 100]} axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#fff',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '12px',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                  }}
+                />
+                <Line type="monotone" dataKey="score" stroke="#6366f1" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <div className="py-12 text-center text-slate-500 dark:text-slate-400">暂无曲线数据</div>
+        )}
+      </motion.div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <motion.div
+          className="bg-white dark:bg-slate-800 rounded-2xl p-6"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <span className="font-semibold text-slate-800 dark:text-white">重点能力方向</span>
+          </div>
+          {ability.focusAreas.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {ability.focusAreas.map(a => (
+                <span
+                  key={a.area}
+                  className="px-3 py-1.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-sm font-medium"
+                >
+                  {a.area} · {a.mentionCount}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div className="text-slate-500 dark:text-slate-400">暂无</div>
+          )}
+        </motion.div>
+
+        <motion.div
+          className="bg-white dark:bg-slate-800 rounded-2xl p-6"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15 }}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <span className="font-semibold text-slate-800 dark:text-white">个性化建议</span>
+          </div>
+          {ability.suggestions.length > 0 ? (
+            <div className="space-y-3">
+              {ability.suggestions.map((s, idx) => (
+                <div key={`${s.area}-${idx}`} className="p-4 rounded-xl border border-slate-200 dark:border-slate-700">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="px-2 py-0.5 rounded text-xs font-semibold bg-primary-100 dark:bg-primary-900 text-primary-600 dark:text-primary-400">
+                      {s.priority}
+                    </span>
+                    <span className="text-sm font-semibold text-slate-800 dark:text-white">{s.title}</span>
+                  </div>
+                  <div className="text-sm text-slate-600 dark:text-slate-300">{s.description}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-slate-500 dark:text-slate-400">暂无</div>
+          )}
+        </motion.div>
+      </div>
+
+      <motion.div
+        className="bg-white dark:bg-slate-800 rounded-2xl p-6"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.2 }}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <span className="font-semibold text-slate-800 dark:text-white">学习资料</span>
+          <span className="text-xs text-slate-400 dark:text-slate-500">仅展示可验证链接</span>
+        </div>
+        {ability.resources.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {ability.resources.map((r, idx) => (
+              <a
+                key={`${r.url}-${idx}`}
+                href={r.url}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-slate-800 dark:text-white truncate">{r.title}</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 truncate">{r.area} · {r.source}</div>
+                  </div>
+                  <ExternalLink className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                </div>
+              </a>
+            ))}
+          </div>
+        ) : (
+          <div className="text-slate-500 dark:text-slate-400">暂无</div>
+        )}
+      </motion.div>
+    </div>
   );
 }
